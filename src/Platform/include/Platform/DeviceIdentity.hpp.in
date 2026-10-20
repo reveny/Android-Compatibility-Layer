@@ -1,0 +1,31 @@
+#pragma once
+
+namespace Platform
+{
+    inline constexpr const char* DEVICE_BRAND = "@RUNTIME_DEVICE_BRAND@";
+    inline constexpr const char* DEVICE_MANUFACTURER = "@RUNTIME_DEVICE_MANUFACTURER@";
+    inline constexpr const char* DEVICE_MODEL = "@RUNTIME_DEVICE_MODEL@";
+    inline constexpr const char* DEVICE_NAME = "@RUNTIME_DEVICE_NAME@";
+    inline constexpr const char* DEVICE_PRODUCT = "@RUNTIME_DEVICE_PRODUCT@";
+    inline constexpr const char* DEVICE_BOARD = "@RUNTIME_DEVICE_BOARD@";
+    inline constexpr const char* DEVICE_HARDWARE = "@RUNTIME_DEVICE_HARDWARE@";
+    inline constexpr const char* DEVICE_SOC_MANUFACTURER = "@RUNTIME_DEVICE_SOC_MANUFACTURER@";
+    inline constexpr const char* DEVICE_SOC_MODEL = "@RUNTIME_DEVICE_SOC_MODEL@";
+    inline constexpr const char* BUILD_IDENTIFIER = "@RUNTIME_BUILD_ID@";
+    inline constexpr const char* BUILD_INCREMENTAL = "@RUNTIME_BUILD_INCREMENTAL@";
+    inline constexpr const char* BUILD_TYPE = "@RUNTIME_BUILD_TYPE@";
+    inline constexpr const char* BUILD_TAGS = "@RUNTIME_BUILD_TAGS@";
+    inline constexpr const char* BUILD_HOST = "@RUNTIME_BUILD_HOST@";
+    inline constexpr const char* BUILD_USER = "@RUNTIME_BUILD_USER@";
+    inline constexpr const char* SECURITY_PATCH = "@RUNTIME_SECURITY_PATCH@";
+    inline constexpr const char* DECLARED_RELEASE = "@RUNTIME_DECLARED_RELEASE@";
+    inline constexpr const char* DECLARED_SDK = "@RUNTIME_DECLARED_SDK_VERSION@";
+    inline constexpr const char* DEVICE_GPU = "@RUNTIME_DEVICE_GPU@";
+    inline constexpr const char* DEVICE_GPU_VENDOR = "@RUNTIME_DEVICE_GPU_VENDOR@";
+    inline constexpr const char* DECLARED_GL_ES_VERSION = "@RUNTIME_DECLARED_GL_ES_VERSION@";
+    inline constexpr unsigned long long DEVICE_MEMORY_KILOBYTES = @RUNTIME_DEVICE_MEMORY_MB@ull * 1024ull;
+
+    inline constexpr const char* BUILD_FINGERPRINT = "@RUNTIME_DEVICE_BRAND@/@RUNTIME_DEVICE_PRODUCT@/@RUNTIME_DEVICE_NAME@:"
+                                                     "@RUNTIME_DECLARED_RELEASE@/@RUNTIME_BUILD_ID@/@RUNTIME_BUILD_INCREMENTAL@:"
+                                                     "@RUNTIME_BUILD_TYPE@/@RUNTIME_BUILD_TAGS@";
+}

@@ -1,0 +1,36 @@
+ACL (Android Compatibility Layer)
+
+ACL's own source is MIT licensed; see LICENSE.
+
+A release bundle redistributes third-party components under their own terms.
+
+Android Open Source Project — Apache License 2.0
+    The managed runtime under art/ (libart and the boot class path jars), the
+    resource and asset machinery, and the arm64 native bridge stubs are taken
+    from AOSP. The full text of the Apache License 2.0 is at
+    https://www.apache.org/licenses/LICENSE-2.0 and the per-file licence
+    headers are kept intact in the sources under third_party/.
+
+    android/android.jar is the Android SDK platform archive, redistributed for
+    its framework resource table.
+
+LLVM — Apache License 2.0 with LLVM Exceptions
+    lib/libLLVM.so and lib/liblld*.so, plus bin/ld.lld, come from the LLVM
+    project. See https://llvm.org/LICENSE.txt.
+
+Roboto — Apache License 2.0
+    The fonts under fonts/ are from the Roboto project.
+
+Other libraries under lib/
+    FreeType (FTL or GPLv2), HarfBuzz (MIT), libpng (PNG Reference Library
+    License), libjpeg-turbo (BSD-3-Clause and IJG), libwebp (BSD-3-Clause),
+    SQLite (public domain), zlib (zlib licence), zstd (BSD-3-Clause and
+    GPLv2), xz/liblzma (public domain and others), libxml2 (MIT), Wayland
+    (MIT), libxkbcommon (MIT), PipeWire (MIT), GLib (LGPL-2.1-or-later),
+    brotli (MIT), graphite2 (LGPL-2.1-or-later or MPL-1.1), libffi (MIT),
+    libedit (BSD-3-Clause), ncurses/libtinfo (MIT), PCRE2 (BSD-3-Clause),
+    bzip2 (BSD-4-Clause-like).
+
+    These are copied from the build host unmodified. Their licence texts ship
+    with the distributions they came from; see docs/provenance.md for how each
+    one entered the tree.

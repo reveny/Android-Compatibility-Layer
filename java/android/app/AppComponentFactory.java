@@ -1,0 +1,46 @@
+package android.app;
+
+import android.content.BroadcastReceiver;
+import android.content.ContentProvider;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+
+public class AppComponentFactory
+{
+    public static final AppComponentFactory DEFAULT = new AppComponentFactory();
+
+    public ClassLoader instantiateClassLoader(ClassLoader cl, ApplicationInfo aInfo)
+    {
+        return cl;
+    }
+
+    public Application instantiateApplication(ClassLoader cl, String className)
+            throws ClassNotFoundException, IllegalAccessException, InstantiationException
+    {
+        return (Application)cl.loadClass(className).newInstance();
+    }
+
+    public Activity instantiateActivity(ClassLoader cl, String className, Intent intent)
+            throws ClassNotFoundException, IllegalAccessException, InstantiationException
+    {
+        return (Activity)cl.loadClass(className).newInstance();
+    }
+
+    public BroadcastReceiver instantiateReceiver(ClassLoader cl, String className, Intent intent)
+            throws ClassNotFoundException, IllegalAccessException, InstantiationException
+    {
+        return (BroadcastReceiver)cl.loadClass(className).newInstance();
+    }
+
+    public Service instantiateService(ClassLoader cl, String className, Intent intent)
+            throws ClassNotFoundException, IllegalAccessException, InstantiationException
+    {
+        return (Service)cl.loadClass(className).newInstance();
+    }
+
+    public ContentProvider instantiateProvider(ClassLoader cl, String className)
+            throws ClassNotFoundException, IllegalAccessException, InstantiationException
+    {
+        return (ContentProvider)cl.loadClass(className).newInstance();
+    }
+}

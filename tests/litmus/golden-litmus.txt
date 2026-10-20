@@ -1,0 +1,4 @@
+mp_relaxed iterations=500000 forbidden=0 interleaved=yes
+mp_dmb_ish iterations=500000 forbidden=0 interleaved=yes
+mp_release_acquire iterations=500000 forbidden=0 interleaved=yes
+sb_relaxed iterations=500000 forbidden=0 interleaved=yes

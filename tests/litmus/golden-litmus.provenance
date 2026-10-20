@@ -1,0 +1,8 @@
+device_model=
+device_abi=arm64-v8a
+android_sdk=36
+cpu_features=fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 sm3 sm4 asimddp sha512 asimdfhm dit uscat ilrcpc flagm sb paca pacg dcpodp flagm2 frint i8mm bf16 bti
+ndk=29.0.14206865
+iterations=500000
+writer_cpu=0
+reader_cpu=4

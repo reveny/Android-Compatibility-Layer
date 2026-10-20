@@ -1,0 +1,36 @@
+package runtime;
+
+public final class PlatformConfig
+{
+    public static final int SDK_INT = @RUNTIME_DECLARED_SDK_VERSION@;
+    public static final String RELEASE = "@RUNTIME_DECLARED_RELEASE@";
+
+    public static final String BRAND = "@RUNTIME_DEVICE_BRAND@";
+    public static final String MANUFACTURER = "@RUNTIME_DEVICE_MANUFACTURER@";
+    public static final String MODEL = "@RUNTIME_DEVICE_MODEL@";
+    public static final String DEVICE = "@RUNTIME_DEVICE_NAME@";
+    public static final String PRODUCT = "@RUNTIME_DEVICE_PRODUCT@";
+    public static final String BOARD = "@RUNTIME_DEVICE_BOARD@";
+    public static final String HARDWARE = "@RUNTIME_DEVICE_HARDWARE@";
+    public static final String SOC_MANUFACTURER = "@RUNTIME_DEVICE_SOC_MANUFACTURER@";
+    public static final String SOC_MODEL = "@RUNTIME_DEVICE_SOC_MODEL@";
+    public static final String BUILD_ID = "@RUNTIME_BUILD_ID@";
+    public static final String INCREMENTAL = "@RUNTIME_BUILD_INCREMENTAL@";
+    public static final String BUILD_TYPE = "@RUNTIME_BUILD_TYPE@";
+    public static final String BUILD_TAGS = "@RUNTIME_BUILD_TAGS@";
+    public static final String BUILD_HOST = "@RUNTIME_BUILD_HOST@";
+    public static final String BUILD_USER = "@RUNTIME_BUILD_USER@";
+    public static final String SECURITY_PATCH = "@RUNTIME_SECURITY_PATCH@";
+
+    public static final String GPU_RENDERER = "@RUNTIME_DEVICE_GPU@";
+    public static final String GPU_VENDOR = "@RUNTIME_DEVICE_GPU_VENDOR@";
+    public static final String GL_ES_VERSION = "@RUNTIME_DECLARED_GL_ES_VERSION@";
+
+    public static final String FINGERPRINT =
+            BRAND + "/" + PRODUCT + "/" + DEVICE + ":" + RELEASE + "/" + BUILD_ID + "/" + INCREMENTAL + ":" + BUILD_TYPE + "/"
+                    + BUILD_TAGS;
+
+    private PlatformConfig()
+    {
+    }
+}

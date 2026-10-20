@@ -1,0 +1,4 @@
+mp_relaxed outcomes 00=499949 01=13 10=1 11=37
+mp_dmb_ish outcomes 00=499980 01=6 10=0 11=14
+mp_release_acquire outcomes 00=499990 01=0 10=0 11=10
+sb_relaxed outcomes 00=238425 01=24 10=261551 11=0

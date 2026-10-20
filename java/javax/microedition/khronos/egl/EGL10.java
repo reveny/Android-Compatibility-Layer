@@ -1,0 +1,87 @@
+package javax.microedition.khronos.egl;
+
+public interface EGL10 extends EGL
+{
+    int EGL_SUCCESS = 0x3000;
+    int EGL_NOT_INITIALIZED = 0x3001;
+    int EGL_BAD_ACCESS = 0x3002;
+    int EGL_BAD_ALLOC = 0x3003;
+    int EGL_BAD_ATTRIBUTE = 0x3004;
+    int EGL_BAD_CONFIG = 0x3005;
+    int EGL_BAD_CONTEXT = 0x3006;
+    int EGL_BAD_CURRENT_SURFACE = 0x3007;
+    int EGL_BAD_DISPLAY = 0x3008;
+    int EGL_BAD_MATCH = 0x3009;
+    int EGL_BAD_NATIVE_PIXMAP = 0x300A;
+    int EGL_BAD_NATIVE_WINDOW = 0x300B;
+    int EGL_BAD_PARAMETER = 0x300C;
+    int EGL_BAD_SURFACE = 0x300D;
+
+    int EGL_BUFFER_SIZE = 0x3020;
+    int EGL_ALPHA_SIZE = 0x3021;
+    int EGL_BLUE_SIZE = 0x3022;
+    int EGL_GREEN_SIZE = 0x3023;
+    int EGL_RED_SIZE = 0x3024;
+    int EGL_DEPTH_SIZE = 0x3025;
+    int EGL_STENCIL_SIZE = 0x3026;
+    int EGL_CONFIG_CAVEAT = 0x3027;
+    int EGL_CONFIG_ID = 0x3028;
+    int EGL_LEVEL = 0x3029;
+    int EGL_MAX_PBUFFER_HEIGHT = 0x302A;
+    int EGL_MAX_PBUFFER_PIXELS = 0x302B;
+    int EGL_MAX_PBUFFER_WIDTH = 0x302C;
+    int EGL_NATIVE_RENDERABLE = 0x302D;
+    int EGL_NATIVE_VISUAL_ID = 0x302E;
+    int EGL_NATIVE_VISUAL_TYPE = 0x302F;
+    int EGL_SAMPLES = 0x3031;
+    int EGL_SAMPLE_BUFFERS = 0x3032;
+    int EGL_SURFACE_TYPE = 0x3033;
+    int EGL_TRANSPARENT_TYPE = 0x3034;
+    int EGL_TRANSPARENT_BLUE_VALUE = 0x3035;
+    int EGL_TRANSPARENT_GREEN_VALUE = 0x3036;
+    int EGL_TRANSPARENT_RED_VALUE = 0x3037;
+    int EGL_NONE = 0x3038;
+    int EGL_RENDERABLE_TYPE = 0x3040;
+
+    int EGL_VENDOR = 0x3053;
+    int EGL_VERSION = 0x3054;
+    int EGL_EXTENSIONS = 0x3055;
+
+    int EGL_HEIGHT = 0x3056;
+    int EGL_WIDTH = 0x3057;
+
+    int EGL_DRAW = 0x3059;
+    int EGL_READ = 0x305A;
+
+    int EGL_PBUFFER_BIT = 0x0001;
+    int EGL_PIXMAP_BIT = 0x0002;
+    int EGL_WINDOW_BIT = 0x0004;
+
+    Object EGL_DEFAULT_DISPLAY = null;
+    EGLContext EGL_NO_CONTEXT = null;
+    EGLDisplay EGL_NO_DISPLAY = null;
+    EGLSurface EGL_NO_SURFACE = null;
+
+    boolean eglChooseConfig(EGLDisplay display, int[] attributeList, EGLConfig[] configs, int configSize, int[] numConfig);
+    EGLContext eglCreateContext(EGLDisplay display, EGLConfig config, EGLContext shareContext, int[] attributeList);
+    EGLSurface eglCreatePbufferSurface(EGLDisplay display, EGLConfig config, int[] attributeList);
+    EGLSurface eglCreateWindowSurface(EGLDisplay display, EGLConfig config, Object nativeWindow, int[] attributeList);
+    boolean eglDestroyContext(EGLDisplay display, EGLContext context);
+    boolean eglDestroySurface(EGLDisplay display, EGLSurface surface);
+    boolean eglGetConfigAttrib(EGLDisplay display, EGLConfig config, int attribute, int[] value);
+    boolean eglGetConfigs(EGLDisplay display, EGLConfig[] configs, int configSize, int[] numConfig);
+    EGLContext eglGetCurrentContext();
+    EGLDisplay eglGetCurrentDisplay();
+    EGLSurface eglGetCurrentSurface(int readdraw);
+    EGLDisplay eglGetDisplay(Object nativeDisplay);
+    int eglGetError();
+    boolean eglInitialize(EGLDisplay display, int[] majorMinor);
+    boolean eglMakeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface read, EGLContext context);
+    boolean eglQueryContext(EGLDisplay display, EGLContext context, int attribute, int[] value);
+    String eglQueryString(EGLDisplay display, int name);
+    boolean eglQuerySurface(EGLDisplay display, EGLSurface surface, int attribute, int[] value);
+    boolean eglSwapBuffers(EGLDisplay display, EGLSurface surface);
+    boolean eglTerminate(EGLDisplay display);
+    boolean eglWaitGL();
+    boolean eglWaitNative(int engine, Object bindTarget);
+}

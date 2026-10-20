@@ -1,0 +1,1 @@
+deflated payload that aapt2 will compress because it repeats and repeats and repeats and repeats

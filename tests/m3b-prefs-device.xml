@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="name">acl</string>
+    <int name="count" value="7" />
+    <long name="stamp" value="1234567890123" />
+    <boolean name="enabled" value="true" />
+    <float name="ratio" value="0.5" />
+    <set name="tags">
+        <string>alpha</string>
+        <string>beta</string>
+    </set>
+</map>
