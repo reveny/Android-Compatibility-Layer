@@ -162,6 +162,11 @@ extern "C" bool AclConditionHolds(uint32_t flagsNzcv, uint8_t condition)
     return GuestState::ConditionHolds(flagsNzcv, condition);
 }
 
+extern "C" uint64_t AclReadVirtualCounter()
+{
+    return Ir::ReadVirtualCounter();
+}
+
 extern "C" bool AclMemoryRead(GuestState::MemoryAccessor* memory, uint64_t address, void* destination, uint64_t length)
 {
     if (!memory->Read) return false;
@@ -462,7 +467,8 @@ static bool IsLowerableOpcode(Ir::Opcode opcode)
         case Ir::Opcode::BranchIndirect:
         case Ir::Opcode::Call:
         case Ir::Opcode::Return:
-        case Ir::Opcode::Undefined: return true;
+        case Ir::Opcode::Undefined:
+        case Ir::Opcode::InvalidateInstructionCache: return true;
         default: return false;
     }
 }
@@ -3059,6 +3065,12 @@ static bool LowerInstruction(Lowering& lowering, const Ir::Instruction& instruct
                 break;
             }
 
+            if (instruction.systemRegister == Ir::SystemRegister::CounterVirtual)
+            {
+                produced = builder.CreateCall(HelperCallee(lowering, "AclReadVirtualCounter", wordType, {}));
+                break;
+            }
+
             if (instruction.systemRegister == Ir::SystemRegister::ThreadPointer ||
                 instruction.systemRegister == Ir::SystemRegister::ThreadPointerReadOnly)
             {
@@ -3449,6 +3461,12 @@ static bool LowerInstruction(Lowering& lowering, const Ir::Instruction& instruct
             terminated = true;
             return true;
 
+        case Ir::Opcode::InvalidateInstructionCache:
+            EmitExit(lowering, Interpreter::ExitReason::InstructionCacheInvalidated,
+                     builder.getInt64((uint64_t)instruction.guestAddress), left, steps);
+            terminated = true;
+            return true;
+
         case Ir::Opcode::BranchConditional:
         {
             llvm::Value* taken = nullptr;
@@ -3520,6 +3538,8 @@ LlvmBackend::Result LlvmBackend::Initialize(const Configuration& configuration, 
     helpers[mangle("aclForeignAccessTally")] = {llvm::orc::ExecutorAddr::fromPtr(&aclForeignAccessTally),
                                                 llvm::JITSymbolFlags::Exported};
     helpers[mangle("AclConditionHolds")] = {llvm::orc::ExecutorAddr::fromPtr(&AclConditionHolds), llvm::JITSymbolFlags::Exported};
+    helpers[mangle("AclReadVirtualCounter")] = {llvm::orc::ExecutorAddr::fromPtr(&AclReadVirtualCounter),
+                                                llvm::JITSymbolFlags::Exported};
     helpers[mangle("AclVectorOperation")] = {llvm::orc::ExecutorAddr::fromPtr(&AclVectorOperation), llvm::JITSymbolFlags::Exported};
     helpers[mangle("AclFloatOperation")] = {llvm::orc::ExecutorAddr::fromPtr(&AclFloatOperation), llvm::JITSymbolFlags::Exported};
     helpers[mangle("AclAtomicOperation")] = {llvm::orc::ExecutorAddr::fromPtr(&AclAtomicOperation), llvm::JITSymbolFlags::Exported};

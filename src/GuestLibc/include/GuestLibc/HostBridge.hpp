@@ -237,6 +237,9 @@ namespace HostBridge
 
     void SetGuestMemoryRange(uint64_t base, uint64_t length);
 
+    using CodeInvalidator = void (*)(void* context, uint64_t address, uint64_t length);
+    void SetCodeInvalidator(CodeInvalidator invalidator, void* context);
+
     void MapAndroidTree(const char* dataDirectory, const char* externalDirectory, const char* systemDirectory,
                         const char* packageName);
 

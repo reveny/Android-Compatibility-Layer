@@ -13,6 +13,7 @@
 #include <dirent.h>
 #include <mutex>
 #include <fcntl.h>
+#include <strings.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -70,7 +71,10 @@ void Launcher::PrintUsage(const char* program)
     fprintf(stderr, "  --decorated   ask the compositor for a title bar and window frame\n");
     fprintf(stderr, "  --fullscreen  ask the compositor for the whole output\n");
     fprintf(stderr, "  --aot         translate every arm64 image before the app starts, the default\n");
-    fprintf(stderr, "  --jit         skip that and translate blocks as they are first reached\n");
+    fprintf(stderr, "  --jit         translate nothing ahead of time: interpret guest code, then compile hot regions as it runs\n");
+    fprintf(stderr, "                tune with --setting %s=N (default %llu), %s=N, %s=baseline|optimized, %s=0|1\n",
+            JIT_THRESHOLD_SETTING, (unsigned long long)DEFAULT_JIT_THRESHOLD, JIT_REGION_BYTES_SETTING, JIT_TIER_SETTING,
+            JIT_BACKGROUND_SETTING);
     fprintf(stderr, "  --install     copy the apk into the data root and record it, then exit\n");
     fprintf(stderr, "  --launch <package>  run a package installed earlier, with its own data directory\n");
     fprintf(stderr, "  --uninstall <package>  forget a package and delete its data\n");
@@ -79,7 +83,8 @@ void Launcher::PrintUsage(const char* program)
     fprintf(stderr, "  --network     let the guest reach the network, which it otherwise cannot\n");
     fprintf(stderr, "  --window WxH  a window of exactly this many pixels\n");
     fprintf(stderr, "  --density N   the dots per inch the guest is told the screen has\n");
-    fprintf(stderr, "  --strict      abort on any unimplemented framework method instead of returning a default\n");
+    fprintf(stderr, "  --strict      abort on any unimplemented framework method instead of returning a default, the default\n");
+    fprintf(stderr, "  --no-strict   return a default from unimplemented framework methods and keep running\n");
     fprintf(stderr, "  --trace AREAS log every crossing of the named boundaries: jni,ndk,syscall,guest,sync,audio,all\n");
     fprintf(stderr, "  --log FILE    write the runtime log to a file as well as the terminal\n");
     fprintf(stderr, "  --frame-dump FILE        write the composed frames to a file as raw BGRA\n");
@@ -258,6 +263,46 @@ static void SetUnlessPresent(const char* name, const std::string& value)
     if (Settings::Has(name)) return;
 
     Settings::Set(name, value);
+}
+
+static bool UnsignedSetting(const char* name, uint64_t fallback, uint64_t& value)
+{
+    value = fallback;
+
+    const char* text = Settings::Lookup(name);
+    if (!text || !*text) return true;
+    if (!isdigit((unsigned char)text[0])) return false;
+
+    char* end = nullptr;
+    unsigned long long parsed = strtoull(text, &end, 10);
+    if (!end || *end != '\0' || parsed == ULLONG_MAX) return false;
+
+    value = (uint64_t)parsed;
+    return true;
+}
+
+static bool JitTier(LlvmBackend::Tier& tier)
+{
+    tier = LlvmBackend::Tier::Baseline;
+
+    const char* text = Settings::Lookup(Launcher::JIT_TIER_SETTING);
+    if (!text || !*text || strcasecmp(text, "baseline") == 0) return true;
+
+    if (strcasecmp(text, "optimized") != 0) return false;
+
+    tier = LlvmBackend::Tier::Optimized;
+    return true;
+}
+
+static bool JitSettingsValid()
+{
+    uint64_t threshold = 0;
+    uint64_t regionBytes = 0;
+    LlvmBackend::Tier tier = LlvmBackend::Tier::Baseline;
+
+    return UnsignedSetting(Launcher::JIT_THRESHOLD_SETTING, Launcher::DEFAULT_JIT_THRESHOLD, threshold) &&
+           UnsignedSetting(Launcher::JIT_REGION_BYTES_SETTING, GuestRuntime::DEFAULT_RECOMPILE_REGION_BYTES, regionBytes) &&
+           JitTier(tier);
 }
 
 static bool ParseWindowSize(const char* text, Launcher::Options& options)
@@ -820,6 +865,24 @@ Launcher::Result Launcher::ParseArguments(int argc, char** argv, Options& option
     if (options.decorated) SetUnlessPresent(DECORATED_SETTING, "1");
     if (options.fullscreen) SetUnlessPresent(FULLSCREEN_SETTING, "1");
     if (options.network) SetUnlessPresent(NETWORK_SETTING, "1");
+
+    if (!options.aheadOfTime)
+    {
+        const char* required = Settings::Lookup(REQUIRE_TRANSLATED_SETTING);
+        if (required && strcmp(required, "0") != 0)
+        {
+            fprintf(stderr, "[acl] --jit compiles guest code while it runs, so it cannot also require every block to be translated "
+                            "ahead of time\n");
+            return Result::UsageError;
+        }
+
+        if (!JitSettingsValid())
+        {
+            fprintf(stderr, "[acl] %s and %s take a whole number, and %s takes baseline or optimized\n", JIT_THRESHOLD_SETTING,
+                    JIT_REGION_BYTES_SETTING, JIT_TIER_SETTING);
+            return Result::UsageError;
+        }
+    }
 
     if (options.windowWidth <= 0 || options.windowHeight <= 0)
     {
@@ -2051,8 +2114,31 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
         guestConfiguration.stubUnresolvedSymbols = true;
         guestConfiguration.traceGuest = options.traceJni;
 
-        const char* required = Settings::Lookup(REQUIRE_TRANSLATED_SETTING);
-        guestConfiguration.requireTranslated = required == nullptr || strcmp(required, "0") != 0;
+        if (options.aheadOfTime)
+        {
+            const char* required = Settings::Lookup(REQUIRE_TRANSLATED_SETTING);
+            guestConfiguration.requireTranslated = required == nullptr || strcmp(required, "0") != 0;
+        }
+        else
+        {
+            guestConfiguration.requireTranslated = false;
+            guestConfiguration.recompile = true;
+            UnsignedSetting(JIT_THRESHOLD_SETTING, DEFAULT_JIT_THRESHOLD, guestConfiguration.recompileThreshold);
+            UnsignedSetting(JIT_REGION_BYTES_SETTING, GuestRuntime::DEFAULT_RECOMPILE_REGION_BYTES,
+                            guestConfiguration.recompileRegionBytes);
+            JitTier(guestConfiguration.tier);
+            guestConfiguration.traceBlocks = Settings::Tracing("blocks");
+
+            const char* background = Settings::Lookup(JIT_BACKGROUND_SETTING);
+            guestConfiguration.recompileInBackground = background == nullptr || strcmp(background, "0") != 0;
+
+            fprintf(stderr,
+                    "[launcher] guest code is interpreted until a block has run %llu time(s), then compiled %s in regions of up to %llu "
+                    "bytes at the %s tier; nothing is translated ahead of time\n",
+                    (unsigned long long)guestConfiguration.recompileThreshold,
+                    guestConfiguration.recompileInBackground ? "on a background thread" : "on the thread that reached it",
+                    (unsigned long long)guestConfiguration.recompileRegionBytes, LlvmBackend::TierName(guestConfiguration.tier));
+        }
 
         guestConfiguration.stepLimit = 0;
 
@@ -2080,7 +2166,7 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
             return Result::VmStartFailed;
         }
 
-        JniBridge::InstallLibraryTranslator(bridge, &TranslateGuestLibrary, &translations);
+        if (options.aheadOfTime) JniBridge::InstallLibraryTranslator(bridge, &TranslateGuestLibrary, &translations);
 
 #if defined(RUNTIME_HAVE_VULKAN)
         VulkanWsi::Result vulkan = VulkanWsi::RegisterAll(guest);
@@ -2209,6 +2295,15 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
         fprintf(stderr, "[launcher] guest blocks: %llu total, %llu translated, %llu interpreted, %llu traps hit\n",
                 (unsigned long long)counters.blocksExecuted, (unsigned long long)counters.blocksExecutedTranslated,
                 (unsigned long long)counters.blocksInterpreted, (unsigned long long)counters.trapsHit);
+
+        if (!options.aheadOfTime)
+        {
+            fprintf(stderr,
+                    "[launcher] jit: %llu region(s) covering %llu block(s) compiled at run time, %llu entries ran compiled, %llu "
+                    "region(s) left to the interpreter\n",
+                    (unsigned long long)counters.regionsRecompiled, (unsigned long long)counters.blocksRecompiled,
+                    (unsigned long long)counters.blocksExecutedNative, (unsigned long long)counters.recompileFailures);
+        }
 
 #if defined(RUNTIME_HAVE_VULKAN)
         VulkanWsi::Statistics vulkanCounters = VulkanWsi::GetStatistics();

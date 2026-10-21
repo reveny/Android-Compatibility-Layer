@@ -39,6 +39,7 @@
 #include <utime.h>
 #include <zlib.h>
 
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -1536,6 +1537,21 @@ void HostBridge::SetGuestMemoryRange(uint64_t base, uint64_t length)
     guestMemoryLength = length;
 }
 
+static std::atomic<HostBridge::CodeInvalidator> codeInvalidator{nullptr};
+static std::atomic<void*> codeInvalidatorContext{nullptr};
+
+void HostBridge::SetCodeInvalidator(CodeInvalidator invalidator, void* context)
+{
+    codeInvalidatorContext.store(context, std::memory_order_relaxed);
+    codeInvalidator.store(invalidator, std::memory_order_release);
+}
+
+static void InvalidateGuestCode(uint64_t address, uint64_t length)
+{
+    HostBridge::CodeInvalidator invalidator = codeInvalidator.load(std::memory_order_acquire);
+    if (invalidator) invalidator(codeInvalidatorContext.load(std::memory_order_relaxed), address, length);
+}
+
 void* HostBridge::MapMemory(void* address, uint64_t length, int32_t protection, int32_t flags, int32_t descriptor, int64_t offset)
 {
     bool placed = address != nullptr && (flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) != 0;
@@ -1565,6 +1581,7 @@ int32_t HostBridge::UnmapMemory(void* address, uint64_t length)
 
     int32_t released = munmap(address, (size_t)length);
     if (released == 0) ForgetGuestMapping((uint64_t)address, length);
+    if (released == 0) InvalidateGuestCode((uint64_t)address, length);
 
     return released;
 }
@@ -1578,7 +1595,10 @@ int32_t HostBridge::ProtectMemory(void* address, uint64_t length, int32_t protec
         return -1;
     }
 
-    return mprotect(address, (size_t)length, protection);
+    int32_t changed = mprotect(address, (size_t)length, protection);
+    if (changed == 0 && (protection & PROT_EXEC) != 0) InvalidateGuestCode((uint64_t)address, length);
+
+    return changed;
 }
 
 int32_t HostBridge::AdviseMemory(void* address, uint64_t length, int32_t advice)

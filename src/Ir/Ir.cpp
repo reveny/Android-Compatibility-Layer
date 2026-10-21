@@ -1,5 +1,7 @@
 #include "Ir/Ir.hpp"
 
+#include <ctime>
+
 Ir::Value Ir::MakeValue(uint32_t id, ValueType type)
 {
     Value value;
@@ -19,7 +21,8 @@ bool Ir::IsTerminator(Opcode opcode)
         case Opcode::Return:
         case Opcode::HostCall:
         case Opcode::Syscall:
-        case Opcode::Undefined: return true;
+        case Opcode::Undefined:
+        case Opcode::InvalidateInstructionCache: return true;
         default: return false;
     }
 }
@@ -105,8 +108,17 @@ bool Ir::DescribeSystemRegister(SystemRegister systemRegister, uint64_t& value)
         case SystemRegister::VectorFeatureRegister0: value = 0; return true;
         case SystemRegister::IsaFeatureRegister0: value = ISA_FEATURES_LARGE_ATOMICS; return true;
         case SystemRegister::IsaFeatureRegister1: value = 0; return true;
+        case SystemRegister::CounterFrequency: value = COUNTER_FREQUENCY_HZ; return true;
         default: return false;
     }
+}
+
+uint64_t Ir::ReadVirtualCounter()
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    return (uint64_t)now.tv_sec * COUNTER_FREQUENCY_HZ + (uint64_t)now.tv_nsec * COUNTER_FREQUENCY_HZ / 1000000000ull;
 }
 
 const char* Ir::OpcodeName(Opcode opcode)
@@ -242,6 +254,7 @@ const char* Ir::OpcodeName(Opcode opcode)
         case Opcode::HostCall: return "HostCall";
         case Opcode::Syscall: return "Syscall";
         case Opcode::Undefined: return "Undefined";
+        case Opcode::InvalidateInstructionCache: return "InvalidateInstructionCache";
     }
     return "Unknown";
 }

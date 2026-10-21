@@ -16,7 +16,8 @@ namespace Interpreter
         BlockExhausted,
         Undefined,
         MemoryFault,
-        StepLimitReached
+        StepLimitReached,
+        InstructionCacheInvalidated
     };
 
     struct ExitStatus

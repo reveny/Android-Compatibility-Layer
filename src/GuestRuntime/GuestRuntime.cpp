@@ -9,6 +9,7 @@
 #include "Platform/Platform.hpp"
 
 #include <atomic>
+#include <condition_variable>
 #include <csignal>
 #include <dlfcn.h>
 #include <sys/syscall.h>
@@ -21,6 +22,8 @@
 #include <sys/mman.h>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "Settings/Settings.hpp"
 
@@ -83,6 +86,8 @@ static void ChainToPrevious(int signalNumber, siginfo_t* information, void* cont
 static void ReportGuestRegisters(uint64_t faultAddress);
 static void ReportLoadedModules();
 static bool DescribeTranslatedEntry(uint64_t entryAddress, char* out, size_t capacity);
+
+static thread_local uint64_t gRecompiledEntry = 0;
 
 static std::atomic<GuestRuntime::FaultHandler> gFaultHandler{nullptr};
 static std::atomic<void*> gFaultHandlerContext{nullptr};
@@ -177,6 +182,18 @@ static void ReportFaultingInstruction(void* context)
         return;
     }
 
+    if (gRecompiledEntry != 0)
+    {
+        char where[256];
+        const bool placed = DescribeTranslatedEntry(gRecompiledEntry, where, sizeof(where));
+
+        fprintf(stderr,
+                "[guestruntime]   the faulting instruction is at %016llx, in code the recompiler built at run time for the guest region "
+                "entered at %016llx%s%s\n",
+                (unsigned long long)instruction, (unsigned long long)gRecompiledEntry, placed ? ", which is " : "", placed ? where : "");
+        return;
+    }
+
     fprintf(stderr, "[guestruntime]   the faulting instruction is at %016llx, which belongs to no known image\n",
             (unsigned long long)instruction);
 }
@@ -268,6 +285,21 @@ struct TranslatedBlock
     uint32_t entryBlock = 0;
 };
 
+struct NativeEntry
+{
+    void* hostEntry = nullptr;
+    uint32_t entryBlock = 0;
+    uint64_t regionAddress = 0;
+};
+
+struct RecompiledRegion
+{
+    LlvmBackend::CompiledFunction compiled;
+    uint64_t startAddress = 0;
+    uint64_t endAddress = 0;
+    std::vector<uint64_t> blockAddresses;
+};
+
 struct GuestRuntimeState
 {
     GuestRuntime::Configuration configuration;
@@ -295,7 +327,19 @@ struct GuestRuntimeState
     std::deque<std::string> missingSymbolNames;
 
     std::unordered_map<uint64_t, Ir::Function> blocks;
-    std::unordered_map<uint64_t, LlvmBackend::CompiledFunction> nativeEntries;
+    std::unordered_map<uint64_t, NativeEntry> nativeEntries;
+    std::unordered_map<uint64_t, RecompiledRegion> recompiledRegions;
+    std::unordered_map<uint64_t, uint64_t> blockHits;
+    std::unordered_set<uint64_t> unrecompilable;
+    std::vector<LlvmBackend::CompiledFunction> retiredCode;
+    uint64_t codeLowAddress = UINT64_MAX;
+    uint64_t codeHighAddress = 0;
+    std::thread compiler;
+    std::mutex compileMutex;
+    std::condition_variable compileWake;
+    std::deque<uint64_t> compileQueue;
+    std::unordered_set<uint64_t> compileQueued;
+    bool compileStopping = false;
     std::unordered_map<uint64_t, TranslatedBlock> translatedBlocks;
     std::mutex translatedMutex;
     std::deque<Ir::Function> retired;
@@ -403,6 +447,7 @@ static bool PagesTouch(const GuestRuntimeState* state, uint64_t address, uint64_
 }
 
 static uint64_t InvalidateRange(GuestRuntimeState* state, uint64_t start, uint64_t end);
+static std::string DescribeGuestAddress(GuestRuntimeState* state, uint64_t address);
 
 static bool MemoryRead(void* context, GuestState::GuestAddress address, void* destination, uint64_t length)
 {
@@ -836,59 +881,267 @@ static const Ir::Block* BlockAt(GuestRuntimeState* state, uint64_t address, Gues
         return nullptr;
     }
 
+    uint64_t reach = (uint64_t)function.endAddress + state->configuration.recompileRegionBytes + Arm64Decoder::INSTRUCTION_SIZE_BYTES;
+    if (reach < (uint64_t)function.endAddress) reach = UINT64_MAX;
+
+    if (address < state->codeLowAddress) state->codeLowAddress = address;
+    if (reach > state->codeHighAddress) state->codeHighAddress = reach;
+
     Bump(state->statistics.blocksDecoded);
     auto inserted = state->blocks.emplace(address, std::move(function));
 
     return &inserted.first->second.blocks.front();
 }
 
-static void* NativeEntryFor(GuestRuntimeState* state, uint64_t address)
+static uint64_t ExecutableRunEnd(GuestRuntimeState* state, uint64_t address, uint64_t limit)
 {
-    if (!state->backendReady) return nullptr;
+    std::lock_guard<std::mutex> guard(state->arenaMutex);
 
-    Ir::Function copy;
+    if (!WithinArena(state, address, 1)) return address;
+
+    uint64_t end = RoundDownTo(address, state->pageBytes);
+
+    while (end < limit)
+    {
+        uint64_t page = (end - state->arenaBase) / state->pageBytes;
+        if (page >= state->pageFlags.size()) break;
+        if ((state->pageFlags[(size_t)page] & (PAGE_COMMITTED | PAGE_EXECUTABLE)) != (PAGE_COMMITTED | PAGE_EXECUTABLE)) break;
+
+        end += state->pageBytes;
+    }
+
+    return end < limit ? end : limit;
+}
+
+static bool DecodeRegion(GuestRuntimeState* state, uint64_t address, Ir::Function& region)
+{
+    uint64_t limit = address + state->configuration.recompileRegionBytes;
+    if (limit <= address) return false;
+
+    uint64_t end = ExecutableRunEnd(state, address, limit);
+    if (end <= address + Arm64Decoder::INSTRUCTION_SIZE_BYTES) return false;
+
+    Arm64Decoder::Context decoder;
+    decoder.memory = state->memory;
+    decoder.trapOnUndecodable = true;
+
+    if (Arm64Decoder::DecodeFunction(decoder, (GuestState::GuestAddress)address, (GuestState::GuestAddress)end, region) !=
+        Arm64Decoder::Result::Ok)
+        return false;
+
+    if (region.blocks.empty() || (uint64_t)region.blocks.front().guestAddress != address) return false;
+
+    std::vector<Ir::Block> lowerable;
+    lowerable.reserve(region.blocks.size());
+
+    for (Ir::Block& block : region.blocks)
+    {
+        bool keep = (uint64_t)block.guestAddress == address;
+
+        if (!keep)
+        {
+            keep = true;
+            for (const Ir::Instruction& instruction : block.instructions)
+            {
+                if (LlvmBackend::CanLowerInstruction(instruction)) continue;
+
+                keep = false;
+                break;
+            }
+        }
+
+        if (keep) lowerable.push_back(std::move(block));
+    }
+
+    region.blocks = std::move(lowerable);
+    return Ir::Verify(region);
+}
+
+static bool CompileRecompiledUnit(GuestRuntimeState* state, const Ir::Function& function, LlvmBackend::CompiledFunction& compiled,
+                                  Ir::Opcode& unsupported)
+{
+    if (!LlvmBackend::CanLower(function, unsupported)) return false;
+
+    if (LlvmBackend::CompileFunction(state->backend, function, state->configuration.tier, compiled) != LlvmBackend::Result::Ok)
+        return false;
+
+    return compiled.hostEntryPoint != nullptr;
+}
+
+static NativeEntry RecompileAt(GuestRuntimeState* state, uint64_t address)
+{
+    Ir::Function single;
     uint64_t epoch = 0;
 
     {
         std::lock_guard<std::mutex> guard(state->blockMutex);
 
         auto existing = state->nativeEntries.find(address);
-        if (existing != state->nativeEntries.end()) return existing->second.hostEntryPoint;
+        if (existing != state->nativeEntries.end()) return existing->second;
+
+        if (state->unrecompilable.count(address) != 0) return NativeEntry{};
 
         auto found = state->blocks.find(address);
-        if (found == state->blocks.end()) return nullptr;
+        if (found == state->blocks.end()) return NativeEntry{};
 
-        copy = found->second;
+        single = found->second;
         epoch = state->invalidationEpoch;
     }
 
+    Ir::Function region;
     Ir::Opcode unsupported = Ir::Opcode::Invalid;
     LlvmBackend::CompiledFunction compiled;
 
-    if (LlvmBackend::CanLower(copy, unsupported))
+    bool built = DecodeRegion(state, address, region) && CompileRecompiledUnit(state, region, compiled, unsupported);
+
+    if (!built)
     {
-        LlvmBackend::CompileFunction(state->backend, copy, state->configuration.tier, compiled);
+        region = std::move(single);
+        unsupported = Ir::Opcode::Invalid;
+        built = CompileRecompiledUnit(state, region, compiled, unsupported);
     }
 
-    std::lock_guard<std::mutex> guard(state->blockMutex);
+    NativeEntry entry;
+    bool refused = false;
 
-    if (epoch != state->invalidationEpoch || state->blocks.find(address) == state->blocks.end())
     {
-        LlvmBackend::ReleaseFunction(state->backend, compiled);
-        return nullptr;
+        std::lock_guard<std::mutex> guard(state->blockMutex);
+
+        auto raced = state->nativeEntries.find(address);
+
+        if (epoch != state->invalidationEpoch || raced != state->nativeEntries.end())
+        {
+            if (built) LlvmBackend::ReleaseFunction(state->backend, compiled);
+            return raced != state->nativeEntries.end() ? raced->second : NativeEntry{};
+        }
+
+        if (!built)
+        {
+            state->unrecompilable.insert(address);
+            state->blockHits.erase(address);
+            Bump(state->statistics.recompileFailures);
+            refused = true;
+        }
+        else
+        {
+            RecompiledRegion record;
+            record.compiled = compiled;
+            record.startAddress = address;
+            record.endAddress = address;
+
+            for (uint64_t index = 0; index < region.blocks.size(); ++index)
+            {
+                const Ir::Block& block = region.blocks[index];
+                uint64_t blockAddress = (uint64_t)block.guestAddress;
+                uint64_t blockEnd = (uint64_t)block.guestEndAddress;
+
+                if (blockAddress < record.startAddress) record.startAddress = blockAddress;
+                if (blockEnd > record.endAddress) record.endAddress = blockEnd;
+
+                record.blockAddresses.push_back(blockAddress);
+
+                if (state->nativeEntries.count(blockAddress) != 0) continue;
+
+                NativeEntry published;
+                published.hostEntry = compiled.hostEntryPoint;
+                published.entryBlock = (uint32_t)index;
+                published.regionAddress = address;
+                state->nativeEntries[blockAddress] = published;
+            }
+
+            if (record.endAddress <= record.startAddress) record.endAddress = record.startAddress + Arm64Decoder::INSTRUCTION_SIZE_BYTES;
+
+            state->recompiledRegions[address] = std::move(record);
+            state->blockHits.erase(address);
+            std::atomic_ref<uint64_t>(state->statistics.blocksRecompiled).fetch_add(region.blocks.size(), std::memory_order_relaxed);
+            Bump(state->statistics.regionsRecompiled);
+
+            entry = state->nativeEntries[address];
+        }
     }
 
-    auto raced = state->nativeEntries.find(address);
-    if (raced != state->nativeEntries.end())
+    if (refused && Settings::Tracing("blocks"))
     {
-        LlvmBackend::ReleaseFunction(state->backend, compiled);
-        return raced->second.hostEntryPoint;
+        const bool named = unsupported != Ir::Opcode::Invalid;
+
+        fprintf(stderr, "[guestruntime] %016llx (%s) stays interpreted: the recompiler could not compile it%s%s\n",
+                (unsigned long long)address, DescribeGuestAddress(state, address).c_str(), named ? ", it cannot lower " : "",
+                named ? Ir::OpcodeName(unsupported) : "");
     }
 
-    if (compiled.hostEntryPoint) Bump(state->statistics.blocksRecompiled);
+    return entry;
+}
 
-    state->nativeEntries[address] = compiled;
-    return compiled.hostEntryPoint;
+static NativeEntry NativeEntryFor(GuestRuntimeState* state, uint64_t address)
+{
+    if (!state->backendReady) return NativeEntry{};
+
+    bool queued = false;
+
+    {
+        std::lock_guard<std::mutex> guard(state->blockMutex);
+
+        auto existing = state->nativeEntries.find(address);
+        if (existing != state->nativeEntries.end()) return existing->second;
+
+        if (state->unrecompilable.count(address) != 0) return NativeEntry{};
+        if (state->blocks.count(address) == 0) return NativeEntry{};
+
+        uint64_t hits = ++state->blockHits[address];
+        if (hits < state->configuration.recompileThreshold) return NativeEntry{};
+
+        if (state->configuration.recompileInBackground)
+        {
+            std::lock_guard<std::mutex> compileGuard(state->compileMutex);
+            if (!state->compileQueued.insert(address).second) return NativeEntry{};
+
+            state->compileQueue.push_back(address);
+            queued = true;
+        }
+    }
+
+    if (queued)
+    {
+        state->compileWake.notify_one();
+        return NativeEntry{};
+    }
+
+    return RecompileAt(state, address);
+}
+
+static void RunBackgroundCompiler(GuestRuntimeState* state)
+{
+    for (;;)
+    {
+        uint64_t address = 0;
+
+        {
+            std::unique_lock<std::mutex> guard(state->compileMutex);
+            state->compileWake.wait(guard, [state]() { return state->compileStopping || !state->compileQueue.empty(); });
+            if (state->compileStopping) return;
+
+            address = state->compileQueue.front();
+            state->compileQueue.pop_front();
+        }
+
+        RecompileAt(state, address);
+
+        std::lock_guard<std::mutex> guard(state->compileMutex);
+        state->compileQueued.erase(address);
+    }
+}
+
+static void StopBackgroundCompiler(GuestRuntimeState* state)
+{
+    if (!state->compiler.joinable()) return;
+
+    {
+        std::lock_guard<std::mutex> guard(state->compileMutex);
+        state->compileStopping = true;
+    }
+
+    state->compileWake.notify_all();
+    state->compiler.join();
 }
 
 static GuestRuntime::Result AllocateStackIn(GuestRuntimeState* state, uint64_t bytes, GuestState::GuestAddress& stackTop)
@@ -1148,7 +1401,7 @@ static void StartBlockReporter(GuestRuntimeState* state)
             span.tv_nsec = 0;
             nanosleep(&span, nullptr);
 
-            uint64_t translated = state->statistics.blocksExecutedTranslated;
+            uint64_t translated = state->statistics.blocksExecutedTranslated + state->statistics.blocksExecutedNative;
             uint64_t interpreted = state->statistics.blocksInterpreted;
 
             uint64_t translatedNow = translated - previousTranslated;
@@ -1158,7 +1411,7 @@ static void StartBlockReporter(GuestRuntimeState* state)
             previousTranslated = translated;
             previousInterpreted = interpreted;
 
-            uint64_t recompiled = state->statistics.blocksRecompiled;
+            uint64_t recompiled = state->statistics.regionsRecompiled;
             uint64_t recompiledNow = recompiled - previousRecompiled;
             previousRecompiled = recompiled;
 
@@ -1543,16 +1796,23 @@ static GuestRuntime::Result CallGuestIn(GuestRuntimeState* state, GuestState::Gu
                 return failure;
             }
 
-            void* native = state->configuration.recompile ? NativeEntryFor(state, cursor) : nullptr;
+            NativeEntry native = state->configuration.recompile ? NativeEntryFor(state, cursor) : NativeEntry{};
 
-            if (native)
+            if (native.hostEntry)
             {
                 LlvmBackend::RuntimeContext runtime;
                 runtime.memory = state->memory;
                 AttachBlockTrace(runtime);
 
-                ((LlvmBackend::EntryPoint)native)(&registers, &runtime, &status, 0);
+                memset(&status, 0, sizeof(status));
+
+                const uint64_t enclosingEntry = gRecompiledEntry;
+                gRecompiledEntry = native.regionAddress;
+                ((LlvmBackend::EntryPoint)native.hostEntry)(&registers, &runtime, &status, native.entryBlock);
+                gRecompiledEntry = enclosingEntry;
+
                 Bump(state->statistics.blocksExecutedNative);
+                if (status.reason == Interpreter::ExitReason::Undefined) Bump(state->statistics.trapsHit);
             }
             else
             {
@@ -1608,6 +1868,15 @@ static GuestRuntime::Result CallGuestIn(GuestRuntimeState* state, GuestState::Gu
             }
 
             cursor = (uint64_t)status.targetAddress + 4;
+            continue;
+        }
+
+        if (status.reason == Interpreter::ExitReason::InstructionCacheInvalidated)
+        {
+            uint64_t line = RoundDownTo((uint64_t)status.faultAddress, Ir::INSTRUCTION_CACHE_LINE_BYTES);
+            InvalidateRange(state, line, line + Ir::INSTRUCTION_CACHE_LINE_BYTES);
+
+            cursor = (uint64_t)status.targetAddress + Arm64Decoder::INSTRUCTION_SIZE_BYTES;
             continue;
         }
 
@@ -1776,6 +2045,8 @@ GuestRuntime::Result GuestRuntime::Create(const Configuration& configuration, In
         }
 
         state->backendReady = true;
+
+        if (configuration.recompileInBackground) state->compiler = std::thread(&RunBackgroundCompiler, state);
     }
 
     return Result::Ok;
@@ -1822,7 +2093,20 @@ void GuestRuntime::Destroy(Instance& instance)
 
     ElfLoader::DestroyNamespace(state->libraryNamespace);
     AbiBridge::DestroyRegistry(state->registry);
-    if (state->backendReady) LlvmBackend::Shutdown(state->backend);
+
+    if (state->backendReady)
+    {
+        StopBackgroundCompiler(state);
+
+        for (auto& region : state->recompiledRegions) LlvmBackend::ReleaseFunction(state->backend, region.second.compiled);
+        for (LlvmBackend::CompiledFunction& compiled : state->retiredCode) LlvmBackend::ReleaseFunction(state->backend, compiled);
+
+        state->recompiledRegions.clear();
+        state->retiredCode.clear();
+        state->nativeEntries.clear();
+
+        LlvmBackend::Shutdown(state->backend);
+    }
 
     if (state->arena) munmap(state->arena, (size_t)state->arenaLength);
 
@@ -2247,6 +2531,8 @@ static uint64_t InvalidateRange(GuestRuntimeState* state, uint64_t start, uint64
     std::lock_guard<std::mutex> guard(state->blockMutex);
     uint64_t dropped = 0;
 
+    if (end <= state->codeLowAddress || start >= state->codeHighAddress) return dropped;
+
     state->invalidationEpoch += 1;
 
     for (auto entry = state->blocks.begin(); entry != state->blocks.end();)
@@ -2261,16 +2547,38 @@ static uint64_t InvalidateRange(GuestRuntimeState* state, uint64_t start, uint64
             continue;
         }
 
-        auto native = state->nativeEntries.find(entry->first);
-        if (native != state->nativeEntries.end())
-        {
-            LlvmBackend::ReleaseFunction(state->backend, native->second);
-            state->nativeEntries.erase(native);
-        }
-
+        state->blockHits.erase(entry->first);
+        state->unrecompilable.erase(entry->first);
         state->retired.push_back(std::move(entry->second));
         entry = state->blocks.erase(entry);
         dropped += 1;
+    }
+
+    for (auto region = state->recompiledRegions.begin(); region != state->recompiledRegions.end();)
+    {
+        const RecompiledRegion& record = region->second;
+
+        if (record.endAddress <= start || end <= record.startAddress)
+        {
+            ++region;
+            continue;
+        }
+
+        for (uint64_t blockAddress : record.blockAddresses)
+        {
+            auto native = state->nativeEntries.find(blockAddress);
+            if (native != state->nativeEntries.end() && native->second.regionAddress == region->first) state->nativeEntries.erase(native);
+        }
+
+        state->retiredCode.push_back(record.compiled);
+        region = state->recompiledRegions.erase(region);
+        dropped += 1;
+    }
+
+    for (auto refused = state->unrecompilable.begin(); refused != state->unrecompilable.end();)
+    {
+        if (*refused >= start && *refused < end) refused = state->unrecompilable.erase(refused);
+        else ++refused;
     }
 
     return dropped;

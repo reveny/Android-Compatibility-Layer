@@ -21,6 +21,7 @@ namespace GuestRuntime
     inline constexpr uint64_t DEFAULT_STACK_BYTES = 8ull * 1024 * 1024;
     inline constexpr uint64_t DEFAULT_STEP_LIMIT = 2000000000ull;
     inline constexpr uint64_t SENTINEL_RETURN_ADDRESS = 0x00000000DEAD0000ull;
+    inline constexpr uint64_t DEFAULT_RECOMPILE_REGION_BYTES = 16384;
 
     enum class Result : uint8_t
     {
@@ -49,6 +50,9 @@ namespace GuestRuntime
         bool traceBlocks = false;
         bool stubUnresolvedSymbols = false;
         bool recompile = false;
+        uint64_t recompileThreshold = 0;
+        bool recompileInBackground = false;
+        uint64_t recompileRegionBytes = DEFAULT_RECOMPILE_REGION_BYTES;
         LlvmBackend::Tier tier = LlvmBackend::Tier::Baseline;
     };
 
@@ -60,6 +64,8 @@ namespace GuestRuntime
         uint64_t threadsStarted = 0;
         uint64_t syscalls = 0;
         uint64_t blocksRecompiled = 0;
+        uint64_t regionsRecompiled = 0;
+        uint64_t recompileFailures = 0;
         uint64_t blocksExecutedNative = 0;
         uint64_t codeWritesObserved = 0;
         uint64_t blocksInterpreted = 0;

@@ -569,6 +569,9 @@ static Arm64Decoder::Result DecodeBranch(Ir::Function& function, Ir::Block& bloc
         if (identifier == 0x4024) systemRegister = Ir::SystemRegister::VectorFeatureRegister0;
         if (identifier == 0x4030) systemRegister = Ir::SystemRegister::IsaFeatureRegister0;
         if (identifier == 0x4031) systemRegister = Ir::SystemRegister::IsaFeatureRegister1;
+        if (identifier == 0x5F00) systemRegister = Ir::SystemRegister::CounterFrequency;
+        if (identifier == 0x5F01 || identifier == 0x5F02 || identifier == 0x5F05 || identifier == 0x5F06)
+            systemRegister = Ir::SystemRegister::CounterVirtual;
         if (systemRegister == Ir::SystemRegister::Invalid) return Arm64Decoder::Result::Unimplemented;
 
         uint64_t constantValue = 0;
@@ -610,6 +613,35 @@ static Arm64Decoder::Result DecodeBranch(Ir::Function& function, Ir::Block& bloc
         instruction.order = Ir::MemoryOrder::SequentiallyConsistent;
         instruction.immediate = (encoding >> 8) & 0xf;
         return Arm64Decoder::Result::Ok;
+    }
+
+    if ((encoding & 0xfff80000u) == 0xd5080000u)
+    {
+        uint32_t op1 = (encoding >> 16) & 0x7;
+        uint32_t crn = (encoding >> 12) & 0xf;
+        uint32_t crm = (encoding >> 8) & 0xf;
+        uint32_t op2 = (encoding >> 5) & 0x7;
+        uint32_t rt = encoding & 0x1f;
+
+        if (op1 != 3 || crn != 7 || op2 != 1) return Arm64Decoder::Result::Unimplemented;
+
+        if (crm == 5)
+        {
+            Ir::Value line = EmitReadGeneral(function, block, address, rt, Ir::ValueType::Int64, false);
+
+            Ir::Instruction& instruction = Append(block, Ir::Opcode::InvalidateInstructionCache, address, Ir::ValueType::Int64);
+            instruction.operands[0] = line;
+            instruction.operandCount = 1;
+            return Arm64Decoder::Result::Ok;
+        }
+
+        if (crm == 10 || crm == 11 || crm == 12 || crm == 13 || crm == 14)
+        {
+            Append(block, Ir::Opcode::Hint, address, Ir::ValueType::Int64).immediate = 0;
+            return Arm64Decoder::Result::Ok;
+        }
+
+        return Arm64Decoder::Result::Unimplemented;
     }
 
     (void)op0;

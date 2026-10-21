@@ -10,6 +10,8 @@ namespace Ir
     inline constexpr int MAX_OPERANDS = 4;
     inline constexpr uint32_t INVALID_VALUE_ID = 0xFFFFFFFFu;
     inline constexpr GuestState::GuestAddress NO_SUCCESSOR = static_cast<GuestState::GuestAddress>(0xFFFFFFFFFFFFFFFFull);
+    inline constexpr uint64_t COUNTER_FREQUENCY_HZ = 24000000;
+    inline constexpr uint64_t INSTRUCTION_CACHE_LINE_BYTES = 64;
 
     static_assert(MAX_OPERANDS <= 255, "operandCount is a uint8_t and must be able to hold MAX_OPERANDS");
 
@@ -176,7 +178,8 @@ namespace Ir
         Return,
         HostCall,
         Syscall,
-        Undefined
+        Undefined,
+        InvalidateInstructionCache
     };
 
     enum class Condition : uint8_t
@@ -326,6 +329,7 @@ namespace Ir
     int SizeInBytes(ValueType type);
     int LaneSizeInBytes(LaneWidth laneWidth);
     bool DescribeSystemRegister(SystemRegister systemRegister, uint64_t& value);
+    uint64_t ReadVirtualCounter();
     const char* OpcodeName(Opcode opcode);
     const char* ConditionName(Condition condition);
     bool Verify(const Function& function);

@@ -2657,6 +2657,11 @@ static AbiBridge::Result DescribeAddressHandler(void* context, GuestState::Regis
     return AbiBridge::Result::Ok;
 }
 
+static void InvalidateGuestCode(void* context, uint64_t address, uint64_t length)
+{
+    GuestRuntime::InvalidateBlocks(*(GuestRuntime::Instance*)context, (GuestState::GuestAddress)address, length);
+}
+
 GuestLibc::Result GuestLibc::RegisterAll(GuestRuntime::Instance& instance)
 {
     AbiBridge::Registry& registry = GuestRuntime::BridgeRegistry(instance);
@@ -2665,6 +2670,7 @@ GuestLibc::Result GuestLibc::RegisterAll(GuestRuntime::Instance& instance)
     uint64_t guestMemoryLength = 0;
     GuestRuntime::ArenaBounds(instance, guestMemoryBase, guestMemoryLength);
     HostBridge::SetGuestMemoryRange((uint64_t)guestMemoryBase, guestMemoryLength);
+    HostBridge::SetCodeInvalidator(&InvalidateGuestCode, &instance);
 
     GuestState::GuestAddress streams{};
     if (AbiBridge::LookupGuestData(registry, "__sF", streams) != AbiBridge::Result::Ok)

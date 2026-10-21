@@ -342,6 +342,7 @@ Interpreter::ExitStatus Interpreter::RunBlock(const Ir::Block& block, GuestState
                 if (instruction.systemRegister == Ir::SystemRegister::ThreadPointer) produced = registers.threadPointer;
                 else if (instruction.systemRegister == Ir::SystemRegister::ThreadPointerReadOnly) produced = registers.threadPointer;
                 else if (instruction.systemRegister == Ir::SystemRegister::FloatingPointControl) produced = registers.floatingPointControl;
+                else if (instruction.systemRegister == Ir::SystemRegister::CounterVirtual) produced = Ir::ReadVirtualCounter();
                 else produced = registers.floatingPointStatus;
                 break;
 
@@ -430,6 +431,14 @@ Interpreter::ExitStatus Interpreter::RunBlock(const Ir::Block& block, GuestState
                 status.reason = ExitReason::Syscall;
                 status.targetAddress = static_cast<GuestState::GuestAddress>(instruction.guestAddress);
                 status.hasTargetAddress = true;
+                return status;
+
+            case Ir::Opcode::InvalidateInstructionCache:
+                status.reason = ExitReason::InstructionCacheInvalidated;
+                status.targetAddress = static_cast<GuestState::GuestAddress>(instruction.guestAddress);
+                status.hasTargetAddress = true;
+                status.faultAddress = static_cast<GuestState::GuestAddress>(left);
+                status.hasFaultAddress = true;
                 return status;
 
             case Ir::Opcode::Undefined:
@@ -544,6 +553,7 @@ const char* Interpreter::ExitReasonName(ExitReason reason)
         case ExitReason::Undefined: return "Undefined";
         case ExitReason::MemoryFault: return "MemoryFault";
         case ExitReason::StepLimitReached: return "StepLimitReached";
+        case ExitReason::InstructionCacheInvalidated: return "InstructionCacheInvalidated";
     }
     return "Unknown";
 }

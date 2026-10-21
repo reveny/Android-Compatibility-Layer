@@ -678,6 +678,10 @@ add_test(NAME native-activity-gate
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/run-native-activity-gate.sh ${CMAKE_BINARY_DIR})
 set_tests_properties(native-activity-gate PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 
+add_test(NAME jit-gate
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/run-jit-gate.sh ${CMAKE_BINARY_DIR})
+set_tests_properties(jit-gate PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+
 add_test(NAME guest-vulkan-gate
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/run-guest-vulkan-gate.sh ${CMAKE_BINARY_DIR})
 set_tests_properties(guest-vulkan-gate PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
