@@ -99,4 +99,49 @@ public class UserManager
     {
         return new Bundle();
     }
+
+    public Bundle getUserRestrictions(UserHandle user)
+    {
+        return new Bundle();
+    }
+
+    public boolean hasUserRestriction(String restrictionKey, UserHandle user)
+    {
+        return false;
+    }
+
+    public Bundle getApplicationRestrictions(String packageName)
+    {
+        return new Bundle();
+    }
+
+    public boolean isUserForeground()
+    {
+        return true;
+    }
+
+    public boolean isProfile()
+    {
+        return false;
+    }
+
+    public boolean isAdminUser()
+    {
+        return true;
+    }
+
+    public long getUserCreationTime(UserHandle user)
+    {
+        return 0L;
+    }
+
+    public int getUserCount()
+    {
+        return 1;
+    }
+
+    public static boolean supportsMultipleUsers()
+    {
+        return false;
+    }
 }

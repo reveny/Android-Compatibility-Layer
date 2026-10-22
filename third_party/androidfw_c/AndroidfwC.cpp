@@ -517,6 +517,7 @@ AndroidfwAsset* AndroidfwAssetOpenNonAsset(AndroidfwApk* apk, const char* path)
 
     std::unique_ptr<android::Asset> opened =
         apk->assetManager.OpenNonAsset(path, apk->applicationCookie, android::Asset::ACCESS_RANDOM);
+    if (!opened) opened = apk->assetManager.OpenNonAsset(path, android::Asset::ACCESS_RANDOM);
     if (!opened) return nullptr;
 
     auto* wrapper = new AndroidfwAsset();
@@ -595,6 +596,7 @@ AndroidfwXml* AndroidfwXmlOpen(AndroidfwApk* apk, const char* assetPath)
     if (cookie == android::kInvalidCookie) return nullptr;
 
     std::unique_ptr<android::Asset> asset = apk->assetManager.OpenNonAsset(assetPath, cookie, android::Asset::ACCESS_BUFFER);
+    if (!asset) asset = apk->assetManager.OpenNonAsset(assetPath, android::Asset::ACCESS_BUFFER, &cookie);
     if (!asset) return nullptr;
 
     return OpenTree(std::move(asset), apk->assetManager.GetDynamicRefTableForCookie(cookie));
@@ -622,6 +624,20 @@ AndroidfwXml* AndroidfwXmlOpenResource(AndroidfwApk* apk, uint32_t resourceId)
     if (!asset) return nullptr;
 
     return OpenTree(std::move(asset), apk->assetManager.GetDynamicRefTableForCookie(selected->cookie));
+}
+
+AndroidfwXml* AndroidfwXmlOpenBuffer(AndroidfwApk* apk, const void* data, uint32_t length)
+{
+    if (!apk || !data || length == 0) return nullptr;
+
+    auto* xml = new AndroidfwXml(apk->assetManager.GetDynamicRefTableForCookie(apk->applicationCookie));
+    if (xml->tree.setTo(data, length, true) != android::NO_ERROR)
+    {
+        delete xml;
+        return nullptr;
+    }
+
+    return xml;
 }
 
 void AndroidfwXmlRestart(AndroidfwXml* xml)

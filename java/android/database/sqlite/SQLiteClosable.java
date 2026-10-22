@@ -1,16 +1,28 @@
 package android.database.sqlite;
 
-public abstract class SQLiteClosable implements java.io.Closeable
+import java.io.Closeable;
+
+public abstract class SQLiteClosable implements Closeable
 {
     private int mReferenceCount = 1;
 
+    public SQLiteClosable()
+    {
+    }
+
     protected abstract void onAllReferencesReleased();
+
+    @Deprecated
+    protected void onAllReferencesReleasedFromContainer()
+    {
+        onAllReferencesReleased();
+    }
 
     public void acquireReference()
     {
         synchronized (this)
         {
-            if (mReferenceCount <= 0) throw new IllegalStateException("this object is already closed");
+            if (mReferenceCount <= 0) throw new IllegalStateException("attempt to re-open an already-closed object: " + this);
             mReferenceCount++;
         }
     }
@@ -21,14 +33,25 @@ public abstract class SQLiteClosable implements java.io.Closeable
 
         synchronized (this)
         {
-            mReferenceCount--;
-            released = mReferenceCount == 0;
+            released = --mReferenceCount == 0;
         }
 
         if (released) onAllReferencesReleased();
     }
 
-    @Override
+    @Deprecated
+    public void releaseReferenceFromContainer()
+    {
+        boolean released;
+
+        synchronized (this)
+        {
+            released = --mReferenceCount == 0;
+        }
+
+        if (released) onAllReferencesReleasedFromContainer();
+    }
+
     public void close()
     {
         releaseReference();

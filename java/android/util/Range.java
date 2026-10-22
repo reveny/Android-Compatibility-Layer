@@ -55,12 +55,29 @@ public final class Range<T extends Comparable<? super T>>
         return new Range<>(lower, upper);
     }
 
+    public Range<T> intersect(T lower, T upper)
+    {
+        return intersect(new Range<>(lower, upper));
+    }
+
     public Range<T> extend(Range<T> other)
     {
         T lower = mLower.compareTo(other.mLower) <= 0 ? mLower : other.mLower;
         T upper = mUpper.compareTo(other.mUpper) >= 0 ? mUpper : other.mUpper;
 
         return new Range<>(lower, upper);
+    }
+
+    public Range<T> extend(T lower, T upper)
+    {
+        return extend(new Range<>(lower, upper));
+    }
+
+    public Range<T> extend(T value)
+    {
+        if (value == null) throw new NullPointerException("value must not be null");
+
+        return extend(value, value);
     }
 
     @Override

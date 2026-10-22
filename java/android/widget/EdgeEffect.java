@@ -15,7 +15,10 @@ public class EdgeEffect
     private static final int PULL_MILLIS = 167;
     private static final float MAX_ALPHA = 0.15f;
 
+    public static final android.graphics.BlendMode DEFAULT_BLEND_MODE = android.graphics.BlendMode.SRC_ATOP;
+
     private final Paint mPaint = new Paint();
+    private android.graphics.BlendMode mBlendMode = DEFAULT_BLEND_MODE;
     private final Rect mBounds = new Rect();
 
     private float mDistance;
@@ -28,6 +31,17 @@ public class EdgeEffect
     public EdgeEffect(Context context)
     {
         mPaint.setAntiAlias(true);
+    }
+
+    public void setBlendMode(android.graphics.BlendMode blendMode)
+    {
+        mBlendMode = blendMode;
+        mPaint.setBlendMode(blendMode);
+    }
+
+    public android.graphics.BlendMode getBlendMode()
+    {
+        return mBlendMode;
     }
 
     public EdgeEffect(Context context, android.util.AttributeSet attributes)

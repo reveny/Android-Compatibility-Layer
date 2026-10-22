@@ -3,16 +3,23 @@ package android.graphics;
 import java.util.ArrayList;
 import java.util.List;
 
-public class Region
+public class Region implements android.os.Parcelable
 {
     public enum Op
     {
-        DIFFERENCE,
-        INTERSECT,
-        UNION,
-        XOR,
-        REVERSE_DIFFERENCE,
-        REPLACE
+        DIFFERENCE(0),
+        INTERSECT(1),
+        UNION(2),
+        XOR(3),
+        REVERSE_DIFFERENCE(4),
+        REPLACE(5);
+
+        public final int nativeInt;
+
+        Op(int nativeInt)
+        {
+            this.nativeInt = nativeInt;
+        }
     }
 
     private final List<Rect> mParts = new ArrayList<>();
@@ -378,4 +385,71 @@ public class Region
     {
         return "Region(" + getBounds() + (isComplex() ? " and " + (mParts.size() - 1) + " more" : "") + ")";
     }
+
+    @Override
+    public boolean equals(Object other)
+    {
+        if (!(other instanceof Region)) return false;
+        if (other == this) return true;
+
+        Region region = (Region) other;
+        Region difference = new Region();
+
+        return !difference.op(this, region, Op.XOR);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return getBounds().hashCode();
+    }
+
+    @Override
+    protected void finalize() throws Throwable
+    {
+        super.finalize();
+    }
+
+    @Override
+    public int describeContents()
+    {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(android.os.Parcel destination, int flags)
+    {
+        destination.writeInt(mParts.size());
+
+        for (Rect part : mParts)
+        {
+            destination.writeInt(part.left);
+            destination.writeInt(part.top);
+            destination.writeInt(part.right);
+            destination.writeInt(part.bottom);
+        }
+    }
+
+    public static final android.os.Parcelable.Creator<Region> CREATOR = new android.os.Parcelable.Creator<Region>()
+    {
+        @Override
+        public Region createFromParcel(android.os.Parcel source)
+        {
+            Region region = new Region();
+            int count = source.readInt();
+
+            for (int index = 0; index < count; index++)
+            {
+                region.addPart(source.readInt(), source.readInt(), source.readInt(), source.readInt());
+            }
+
+            return region;
+        }
+
+        @Override
+        public Region[] newArray(int size)
+        {
+            return new Region[size];
+        }
+    };
 }

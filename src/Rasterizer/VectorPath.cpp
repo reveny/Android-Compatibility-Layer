@@ -1,6 +1,7 @@
 #include "Rasterizer/Rasterizer.hpp"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -38,8 +39,15 @@ static FT_Library OutlineLibrary()
     return gLibrary;
 }
 
+static constexpr float COORDINATE_LIMIT = 32768.0f;
+static constexpr FT_Pos SHORT_CURVE_UNITS = FIXED_ONE / 4;
+
 static FT_Pos ToFixed(float value)
 {
+    if (!std::isfinite(value)) value = value > 0.0f ? COORDINATE_LIMIT : (value < 0.0f ? -COORDINATE_LIMIT : 0.0f);
+    if (value > COORDINATE_LIMIT) value = COORDINATE_LIMIT;
+    if (value < -COORDINATE_LIMIT) value = -COORDINATE_LIMIT;
+
     return static_cast<FT_Pos>(std::lround(value * FIXED_ONE));
 }
 
@@ -455,6 +463,16 @@ static FT_Vector MapPoint(const FT_Vector& point, const Rasterizer::Transform& t
     return mapped;
 }
 
+static bool SamePoint(const FT_Vector& first, const FT_Vector& second)
+{
+    return first.x == second.x && first.y == second.y;
+}
+
+static bool WithinShortCurve(const FT_Vector& from, const FT_Vector& point)
+{
+    return std::labs(point.x - from.x) < SHORT_CURVE_UNITS && std::labs(point.y - from.y) < SHORT_CURVE_UNITS;
+}
+
 bool RasterizerFeedStroker(const Rasterizer::Path& path, const Rasterizer::Transform& transform, FT_Stroker stroker)
 {
     std::vector<int32_t> ends(path.contours.begin(), path.contours.end());
@@ -483,11 +501,28 @@ bool RasterizerFeedStroker(const Rasterizer::Path& path, const Rasterizer::Trans
         bool closed = contour < closedFlags.size() && closedFlags[contour] != 0;
 
         FT_Vector start = MapPoint(path.points[first], transform);
+
+        bool extent = false;
+        for (int32_t index = first + 1; index <= last && !extent; ++index)
+        {
+            FT_Vector point = MapPoint(path.points[index], transform);
+            extent = point.x != start.x || point.y != start.y;
+        }
+
+        if (!extent)
+        {
+            first = last + 1;
+            continue;
+        }
+
         if (FT_Stroker_BeginSubPath(stroker, &start, closed ? 0 : 1) != 0)
         {
             first = last + 1;
             continue;
         }
+
+        FT_Vector current = start;
+        bool emitted = false;
 
         int32_t index = first + 1;
         while (index <= last)
@@ -497,7 +532,13 @@ bool RasterizerFeedStroker(const Rasterizer::Path& path, const Rasterizer::Trans
 
             if (tag == FT_CURVE_TAG_ON)
             {
-                FT_Stroker_LineTo(stroker, &point);
+                if (!SamePoint(point, current))
+                {
+                    FT_Stroker_LineTo(stroker, &point);
+                    current = point;
+                    emitted = true;
+                }
+
                 index += 1;
                 continue;
             }
@@ -505,7 +546,20 @@ bool RasterizerFeedStroker(const Rasterizer::Path& path, const Rasterizer::Trans
             if (tag == FT_CURVE_TAG_CONIC && index + 1 <= last)
             {
                 FT_Vector end = MapPoint(path.points[index + 1], transform);
-                FT_Stroker_ConicTo(stroker, &point, &end);
+
+                if (!WithinShortCurve(current, point) || !WithinShortCurve(current, end))
+                {
+                    FT_Stroker_ConicTo(stroker, &point, &end);
+                    current = end;
+                    emitted = true;
+                }
+                else if (!SamePoint(end, current))
+                {
+                    FT_Stroker_LineTo(stroker, &end);
+                    current = end;
+                    emitted = true;
+                }
+
                 index += 2;
                 continue;
             }
@@ -514,12 +568,43 @@ bool RasterizerFeedStroker(const Rasterizer::Path& path, const Rasterizer::Trans
             {
                 FT_Vector second = MapPoint(path.points[index + 1], transform);
                 FT_Vector end = MapPoint(path.points[index + 2], transform);
-                FT_Stroker_CubicTo(stroker, &point, &second, &end);
+
+                if (!WithinShortCurve(current, point) || !WithinShortCurve(current, second) || !WithinShortCurve(current, end))
+                {
+                    FT_Stroker_CubicTo(stroker, &point, &second, &end);
+                    current = end;
+                    emitted = true;
+                }
+                else if (!SamePoint(end, current))
+                {
+                    FT_Stroker_LineTo(stroker, &end);
+                    current = end;
+                    emitted = true;
+                }
+
                 index += 3;
                 continue;
             }
 
             break;
+        }
+
+        if (!emitted)
+        {
+            FT_Vector farthest = start;
+            FT_Pos reach = 0;
+
+            for (int32_t candidate = first + 1; candidate <= last; ++candidate)
+            {
+                FT_Vector point = MapPoint(path.points[candidate], transform);
+                FT_Pos distance = std::labs(point.x - start.x) + std::labs(point.y - start.y);
+                if (distance <= reach) continue;
+
+                reach = distance;
+                farthest = point;
+            }
+
+            FT_Stroker_LineTo(stroker, &farthest);
         }
 
         FT_Stroker_EndSubPath(stroker);

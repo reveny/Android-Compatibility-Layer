@@ -29,8 +29,11 @@ public final class Choreographer
         }
     };
 
+    private static final int FRAME_TIMELINE_COUNT = 3;
+
     private final Handler mHandler;
-    private final ArrayList<FrameCallback> mFrameCallbacks = new ArrayList<>();
+    private final ArrayList<Object> mFrameCallbacks = new ArrayList<>();
+    private long mVsyncId;
     private final ArrayList<TypedCallback>[] mTypedCallbacks = newQueues();
     private final ArrayList<DelayedTypedCallback> mPendingDelayed = new ArrayList<>();
     private long mLastFrameTimeNanos;
@@ -94,6 +97,36 @@ public final class Choreographer
         mHandler.removeCallbacksAndMessages(callback);
     }
 
+    public void postVsyncCallback(VsyncCallback callback)
+    {
+        if (callback == null) throw new IllegalArgumentException("callback must not be null");
+
+        synchronized (mFrameCallbacks)
+        {
+            mFrameCallbacks.add(callback);
+        }
+
+        scheduleFrame();
+    }
+
+    public void removeVsyncCallback(VsyncCallback callback)
+    {
+        if (callback == null) return;
+
+        synchronized (mFrameCallbacks)
+        {
+            mFrameCallbacks.remove(callback);
+        }
+    }
+
+    private static long frameIntervalNanos()
+    {
+        float refreshRate = runtime.WindowBridge.refreshRate();
+        if (refreshRate <= 0) refreshRate = runtime.WindowBridge.FALLBACK_REFRESH_RATE;
+
+        return (long)(1000000000L / refreshRate);
+    }
+
     public void doFrame(long frameTimeNanos)
     {
         mLastFrameTimeNanos = frameTimeNanos;
@@ -134,20 +167,43 @@ public final class Choreographer
 
     private void runFrameCallbacks(long frameTimeNanos)
     {
-        FrameCallback[] pending;
+        Object[] pending;
 
         synchronized (mFrameCallbacks)
         {
             if (mFrameCallbacks.isEmpty()) return;
 
-            pending = mFrameCallbacks.toArray(new FrameCallback[0]);
+            pending = mFrameCallbacks.toArray();
             mFrameCallbacks.clear();
         }
 
-        for (FrameCallback callback : pending)
+        FrameData frameData = null;
+
+        for (Object callback : pending)
         {
-            callback.doFrame(frameTimeNanos);
+            if (callback instanceof FrameCallback)
+            {
+                ((FrameCallback)callback).doFrame(frameTimeNanos);
+                continue;
+            }
+
+            if (frameData == null) frameData = newFrameData(frameTimeNanos);
+            ((VsyncCallback)callback).onVsync(frameData);
         }
+    }
+
+    private FrameData newFrameData(long frameTimeNanos)
+    {
+        long interval = frameIntervalNanos();
+        FrameTimeline[] timelines = new FrameTimeline[FRAME_TIMELINE_COUNT];
+
+        for (int index = 0; index < FRAME_TIMELINE_COUNT; index++)
+        {
+            long presentation = frameTimeNanos + interval * (index + 1);
+            timelines[index] = new FrameTimeline(++mVsyncId, presentation, presentation - interval / 2);
+        }
+
+        return new FrameData(frameTimeNanos, timelines, 0);
     }
 
     public void postCallback(int callbackType, Runnable action, Object token)
@@ -247,6 +303,69 @@ public final class Choreographer
     public interface FrameCallback
     {
         void doFrame(long frameTimeNanos);
+    }
+
+    public interface VsyncCallback
+    {
+        void onVsync(FrameData data);
+    }
+
+    public static class FrameData
+    {
+        private final long mFrameTimeNanos;
+        private final FrameTimeline[] mFrameTimelines;
+        private final int mPreferredIndex;
+
+        FrameData(long frameTimeNanos, FrameTimeline[] frameTimelines, int preferredIndex)
+        {
+            mFrameTimeNanos = frameTimeNanos;
+            mFrameTimelines = frameTimelines;
+            mPreferredIndex = preferredIndex;
+        }
+
+        public long getFrameTimeNanos()
+        {
+            return mFrameTimeNanos;
+        }
+
+        public FrameTimeline[] getFrameTimelines()
+        {
+            return mFrameTimelines.clone();
+        }
+
+        public FrameTimeline getPreferredFrameTimeline()
+        {
+            return mFrameTimelines[mPreferredIndex];
+        }
+    }
+
+    public static class FrameTimeline
+    {
+        private final long mVsyncId;
+        private final long mExpectedPresentationTimeNanos;
+        private final long mDeadlineNanos;
+
+        FrameTimeline(long vsyncId, long expectedPresentationTimeNanos, long deadlineNanos)
+        {
+            mVsyncId = vsyncId;
+            mExpectedPresentationTimeNanos = expectedPresentationTimeNanos;
+            mDeadlineNanos = deadlineNanos;
+        }
+
+        public long getVsyncId()
+        {
+            return mVsyncId;
+        }
+
+        public long getExpectedPresentationTimeNanos()
+        {
+            return mExpectedPresentationTimeNanos;
+        }
+
+        public long getDeadlineNanos()
+        {
+            return mDeadlineNanos;
+        }
     }
 
     private static final class TypedCallback

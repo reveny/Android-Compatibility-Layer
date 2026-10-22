@@ -291,6 +291,7 @@ namespace HostBridge
     int32_t ProcessId();
     int32_t UserId();
     int32_t EffectiveUserId();
+    int32_t GroupId();
     int32_t EffectiveGroupId();
     uint64_t CurrentThread();
     int32_t ThreadsEqual(uint64_t left, uint64_t right);
@@ -355,4 +356,111 @@ namespace HostBridge
     int32_t DecompressInitialize(void* stream, int32_t windowBits, const char* version, int32_t size);
     int32_t Decompress(void* stream, int32_t flush);
     int32_t DecompressEnd(void* stream);
+    int32_t DecompressStart(void* stream, const char* version, int32_t size);
+    int32_t DecompressReset(void* stream);
+    int32_t CompressStart(void* stream, int32_t level, const char* version, int32_t size);
+    int32_t CompressStartDetailed(void* stream, int32_t level, int32_t method, int32_t windowBits, int32_t memoryLevel, int32_t strategy,
+                                  const char* version, int32_t size);
+    int32_t Compress(void* stream, int32_t flush);
+    int32_t CompressEnd(void* stream);
+    int32_t CompressReset(void* stream);
+    uint64_t CompressBound(void* stream, uint64_t length);
+    const char* CompressionErrorText(int32_t code);
+    uint64_t ChecksumCrc32(uint64_t crc, const void* buffer, uint32_t length);
+    uint64_t ChecksumAdler32(uint64_t adler, const void* buffer, uint32_t length);
+
+    void SetStandardStreams(uint64_t base, uint64_t stride);
+
+    int32_t TranslateOpenFlagsToHost(int32_t flags);
+    int32_t TranslateOpenFlagsToGuest(int32_t flags);
+
+    int64_t WriteGathered(int32_t descriptor, const void* vectors, int32_t count);
+    int64_t ReadScattered(int32_t descriptor, const void* vectors, int32_t count);
+    int64_t ReadDescriptorAt(int32_t descriptor, void* buffer, uint64_t count, int64_t offset);
+    int64_t WriteDescriptorAt(int32_t descriptor, const void* buffer, uint64_t count, int64_t offset);
+    int32_t SynchronizeDescriptor(int32_t descriptor);
+    int32_t SynchronizeDescriptorData(int32_t descriptor);
+    int32_t ReplaceDescriptor(int32_t descriptor, int32_t target);
+    int32_t ReplaceDescriptorWithFlags(int32_t descriptor, int32_t target, int32_t flags);
+    int32_t CreatePipeWithFlags(int32_t* descriptors, int32_t flags);
+    int32_t CreateEventDescriptor(uint32_t initial, int32_t flags);
+    int32_t CreateTemporaryFile(char* pattern);
+    uint32_t ChangeCreationMask(uint32_t mask);
+    int32_t AdviseFileAccess(int32_t descriptor, int64_t offset, int64_t length, int32_t advice);
+    int64_t ReadAhead(int32_t descriptor, int64_t offset, uint64_t count);
+    int32_t SynchronizeMemory(void* address, uint64_t length, int32_t flags);
+    int32_t LockMemory(const void* address, uint64_t length);
+    int32_t UnlockMemory(const void* address, uint64_t length);
+
+    int32_t CreateEventPoll(int32_t flags);
+    int32_t CreateEventPollSized(int32_t size);
+    int32_t ControlEventPoll(int32_t poll, int32_t operation, int32_t descriptor, void* event);
+    int32_t WaitEventPoll(int32_t poll, void* events, int32_t capacity, int32_t timeout);
+    int32_t WaitEventPollMasked(int32_t poll, void* events, int32_t capacity, int32_t timeout, const void* mask);
+
+    int32_t CreateFileWatch();
+    int32_t CreateFileWatchWithFlags(int32_t flags);
+    int32_t AddFileWatch(int32_t descriptor, const char* path, uint32_t mask);
+    int32_t RemoveFileWatch(int32_t descriptor, int32_t watch);
+
+    int32_t ParentProcessId();
+    int32_t WaitForChild(int32_t process, int32_t* status, int32_t options);
+    int32_t WaitForAnyChild(int32_t* status);
+    int32_t DescribeSystem(void* out);
+    int32_t DescribeSystemMemory(void* out);
+    int32_t HostName(char* buffer, uint64_t size);
+    int32_t ReadResourceLimit(int32_t resource, void* out);
+    int32_t WriteResourceLimit(int32_t resource, const void* limit);
+    int32_t ReadResourceUsage(int32_t who, void* out);
+    uint32_t ScheduleAlarm(uint32_t seconds);
+    uint32_t SleepSeconds(uint32_t seconds);
+    void SetProgramName(const char* name);
+    const char* ProgramName();
+
+    int32_t SchedulingPolicy(int32_t process);
+    int32_t SchedulingPriorityMinimum(int32_t policy);
+    int32_t SchedulingPriorityMaximum(int32_t policy);
+    int32_t ReadSchedulingParameters(int32_t process, int32_t* priority);
+    int32_t ReadProcessorAffinity(int32_t process, uint64_t size, void* mask);
+    int32_t WriteProcessorAffinity(int32_t process, uint64_t size, const void* mask);
+    int32_t CurrentProcessor();
+
+    int32_t RandomInteger();
+    void SeedRandomInteger(uint32_t seed);
+    int64_t ParseLongLong(const char* text);
+    char* SplitStringShared(char* text, const char* separators);
+    char* FindSubstringIgnoringCase(const char* text, const char* pattern);
+    char* DescribeSignal(int32_t number);
+    void PrintError(const char* prefix);
+    const char* DescribeAddressError(int32_t code);
+    int32_t AddressFromTextChecked(const char* text, void* address);
+    void* NextControlMessage(void* message, void* current);
+    uint64_t FormatWideTime(void* buffer, uint64_t size, const void* format, const void* parts);
+    void UpdateTimeZone();
+
+    float SplitExponentNarrow(float value, int32_t* exponent);
+    double BinaryExponential(double value);
+    float HyperbolicSineNarrow(float value);
+    int64_t RoundToLongNarrow(float value);
+    int64_t RoundToLong(double value);
+    int32_t BinaryExponentNarrow(float value);
+    int32_t ClassifyDouble(double value);
+    int32_t ClassifyNarrow(float value);
+    int32_t IsFiniteNarrow(float value);
+    int32_t IsFinite(double value);
+    int32_t IsNotANumber(double value);
+    int32_t IsInfinite(double value);
+
+    int32_t IsWideAlphabeticAnywhere(int32_t value);
+    int32_t IsWideBlankAnywhere(int32_t value);
+    int32_t IsWideControlAnywhere(int32_t value);
+    int32_t IsWideDigitAnywhere(int32_t value);
+    int32_t IsWideLowerAnywhere(int32_t value);
+    int32_t IsWidePrintableAnywhere(int32_t value);
+    int32_t IsWidePunctuationAnywhere(int32_t value);
+    int32_t IsWideSpaceAnywhere(int32_t value);
+    int32_t IsWideUpperAnywhere(int32_t value);
+    int32_t IsWideHexDigitAnywhere(int32_t value);
+    int32_t IsWideAlphaNumericAnywhere(int32_t value);
+    int32_t IsWideGraphicalAnywhere(int32_t value);
 }

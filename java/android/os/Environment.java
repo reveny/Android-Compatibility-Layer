@@ -26,6 +26,9 @@ public class Environment
     public static final String DIRECTORY_DOWNLOADS = "Download";
     public static final String DIRECTORY_DCIM = "DCIM";
     public static final String DIRECTORY_DOCUMENTS = "Documents";
+    public static final String DIRECTORY_SCREENSHOTS = "Screenshots";
+    public static final String DIRECTORY_AUDIOBOOKS = "Audiobooks";
+    public static final String DIRECTORY_RECORDINGS = "Recordings";
 
     private static File sRoot = new File("/");
     private static File sDataDirectory = new File("/data");

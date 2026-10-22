@@ -12,6 +12,8 @@ namespace Launcher
     inline constexpr const char* SDK_ROOT_LEAF = "Android/Sdk";
     inline constexpr const char* NATIVE_LIBRARY_LEAF = "lib";
     inline constexpr const char* GUEST_SHIM_LEAF = "libaclguest.so";
+    inline constexpr const char* APACHE_HTTP_LIBRARY = "org.apache.http.legacy";
+    inline constexpr int APACHE_HTTP_IMPLICIT_BEFORE_SDK = 28;
     inline constexpr uint64_t DEFAULT_PROCESS_LIMIT = 4096;
 
     inline constexpr const char* REQUIRE_TRANSLATED_SETTING = "require-translated";

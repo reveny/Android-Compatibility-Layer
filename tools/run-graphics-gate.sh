@@ -17,6 +17,15 @@ sources=(
     "$PROJ_DIR/java/android/graphics/Matrix.java"
     "$PROJ_DIR/java/android/graphics/RectF.java"
     "$PROJ_DIR/java/android/graphics/Rect.java"
+    "$PROJ_DIR/java/android/graphics/Insets.java"
+    "$PROJ_DIR/java/android/os/Parcel.java"
+    "$PROJ_DIR/java/android/os/Parcelable.java"
+    "$PROJ_DIR/java/android/os/Bundle.java"
+    "$PROJ_DIR/java/android/os/BaseBundle.java"
+    "$PROJ_DIR/java/android/os/PersistableBundle.java"
+    "$PROJ_DIR/java/android/os/IBinder.java"
+    "$PROJ_DIR/java/android/os/IInterface.java"
+    "$PROJ_DIR/java/android/util/SparseArray.java"
     "$PROJ_DIR/java/android/graphics/Path.java"
     "$PROJ_DIR/java/android/util/PathParser.java"
     "$PROJ_DIR/java/android/view/InputEvent.java"
@@ -34,7 +43,7 @@ for source in "${sources[@]}"; do
     fi
 done
 
-if ! javac --release 11 -nowarn -d "$work" "${sources[@]}" > "$work/javac.log" 2>&1; then
+if ! javac --release 11 -nowarn -sourcepath "$PROJ_DIR/java:$buildDir/java/gen" -d "$work" "${sources[@]}" > "$work/javac.log" 2>&1; then
     echo "gate FAILED: the graphics sources did not compile" >&2
     cat "$work/javac.log" >&2
     exit 1

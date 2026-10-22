@@ -19,6 +19,11 @@ public class ContextWrapper extends Context
         mBase = base;
     }
 
+    void replaceBaseContext(Context base)
+    {
+        mBase = base;
+    }
+
     public Context getBaseContext()
     {
         return mBase;

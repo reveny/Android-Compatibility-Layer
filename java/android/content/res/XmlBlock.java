@@ -3,10 +3,31 @@ package android.content.res;
 import android.util.TypedValue;
 import org.xmlpull.v1.XmlPullParserException;
 
-public final class XmlBlock
+public final class XmlBlock implements AutoCloseable
 {
-    private XmlBlock()
+    private final byte[] mData;
+    private final java.util.ArrayList<Parser> mParsers = new java.util.ArrayList<>();
+
+    public XmlBlock(byte[] data)
     {
+        mData = data;
+    }
+
+    public XmlResourceParser newParser()
+    {
+        android.app.Application application = android.app.ActivityThread.currentApplication();
+        Resources resources = application != null ? application.getResources() : Resources.getSystem();
+
+        XmlResourceParser parser = resources.openXmlBuffer(mData);
+        if (parser instanceof Parser) mParsers.add((Parser)parser);
+        return parser;
+    }
+
+    @Override
+    public void close()
+    {
+        for (Parser parser : mParsers) parser.close();
+        mParsers.clear();
     }
 
     public static final class Parser implements XmlResourceParser

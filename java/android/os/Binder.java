@@ -86,4 +86,44 @@ public class Binder implements IBinder
     {
         return android.os.Process.myUid();
     }
+
+    public static final int getCallingUidOrThrow()
+    {
+        return android.os.Process.myUid();
+    }
+
+    public static final UserHandle getCallingUserHandle()
+    {
+        return android.os.Process.myUserHandle();
+    }
+
+    public static final long clearCallingIdentity()
+    {
+        return ((long)getCallingUid() << 32) | (getCallingPid() & 0xffffffffL);
+    }
+
+    public static final void restoreCallingIdentity(long token)
+    {
+    }
+
+    public static final void flushPendingCommands()
+    {
+    }
+
+    public static final void joinThreadPool()
+    {
+    }
+
+    public void dumpAsync(final java.io.FileDescriptor target, final String[] arguments)
+    {
+        Thread worker = new Thread(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                dump(target, arguments);
+            }
+        }, "Binder.dumpAsync");
+        worker.start();
+    }
 }

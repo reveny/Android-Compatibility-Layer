@@ -65,7 +65,7 @@ target_link_libraries(GlesWsi INTERFACE GuestRuntime AbiBridge Platform Overlay)
 target_link_libraries(GuestSyscall INTERFACE GuestState Diagnostics)
 target_link_libraries(JniBridge INTERFACE GuestRuntime AbiBridge Diagnostics)
 target_link_libraries(AheadOfTime INTERFACE GuestRuntime CodeMap Arm64Decoder LlvmBackend TranslationCache)
-target_link_libraries(NativeActivity INTERFACE GuestRuntime JniBridge AbiBridge Platform)
+target_link_libraries(NativeActivity INTERFACE GuestRuntime JniBridge AbiBridge Apk Platform)
 target_link_libraries(Apk INTERFACE Platform)
 
 target_compile_definitions(Platform INTERFACE RUNTIME_BUILD_SDK_VERSION=${RUNTIME_DECLARED_SDK_VERSION})
@@ -182,8 +182,8 @@ if(RUNTIME_ENABLE_AUDIO)
 endif()
 
 add_library(NativeActivityImpl STATIC NativeActivity/NativeActivity.cpp NativeActivity/NativeActivityJni.cpp
-            NativeActivity/NativeWindowBridge.cpp NativeActivity/AudioBridge.cpp)
-target_link_libraries(NativeActivityImpl PUBLIC NativeActivity GuestRuntimeImpl JniBridgeImpl AbiBridgeImpl AudioDeviceImpl)
+            NativeActivity/NativeWindowBridge.cpp NativeActivity/AudioBridge.cpp NativeActivity/AssetBridge.cpp)
+target_link_libraries(NativeActivityImpl PUBLIC NativeActivity GuestRuntimeImpl JniBridgeImpl AbiBridgeImpl AudioDeviceImpl ApkImpl)
 target_include_directories(NativeActivityImpl SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/NativeActivity/compat
                            ${CMAKE_SOURCE_DIR}/third_party/native/include ${RUNTIME_JNI_INCLUDE_DIR})
 target_compile_options(NativeActivityImpl PRIVATE -Wall -Wextra -Werror)

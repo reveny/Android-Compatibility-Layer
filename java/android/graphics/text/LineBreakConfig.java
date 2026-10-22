@@ -31,6 +31,22 @@ public final class LineBreakConfig
         return mLineBreakWordStyle;
     }
 
+    @Override
+    public boolean equals(Object other)
+    {
+        if (other == this) return true;
+        if (!(other instanceof LineBreakConfig)) return false;
+
+        LineBreakConfig that = (LineBreakConfig)other;
+        return mLineBreakStyle == that.mLineBreakStyle && mLineBreakWordStyle == that.mLineBreakWordStyle;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return 31 * mLineBreakStyle + mLineBreakWordStyle;
+    }
+
     public static final class Builder
     {
         private int mLineBreakStyle = LINE_BREAK_STYLE_NONE;

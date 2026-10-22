@@ -103,6 +103,7 @@ extern "C"
 
     AndroidfwXml* AndroidfwXmlOpen(AndroidfwApk* apk, const char* assetPath);
     AndroidfwXml* AndroidfwXmlOpenResource(AndroidfwApk* apk, uint32_t resourceId);
+    AndroidfwXml* AndroidfwXmlOpenBuffer(AndroidfwApk* apk, const void* data, uint32_t length);
     void AndroidfwXmlClose(AndroidfwXml* xml);
     void AndroidfwXmlRestart(AndroidfwXml* xml);
     int AndroidfwXmlLineNumber(AndroidfwXml* xml);

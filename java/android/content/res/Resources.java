@@ -1,10 +1,14 @@
 package android.content.res;
 
+import android.content.res.loader.ResourcesLoader;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.os.Bundle;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserException;
 
 public class Resources
 {
@@ -13,6 +17,15 @@ public class Resources
     private final DisplayMetrics mMetrics = new DisplayMetrics();
     private final AssetManager mAssets;
     private final java.util.ArrayList<Theme> mLiveThemes = new java.util.ArrayList<>();
+    private final java.util.ArrayList<ResourcesLoader> mLoaders = new java.util.ArrayList<>();
+    private ResourcesImpl mResourcesImpl;
+    private ClassLoader mClassLoader = ClassLoader.getSystemClassLoader();
+
+    public static final int ID_NULL = 0;
+    private static final int ANDROID_NAME = 0x01010003;
+    private static final int ANDROID_VALUE = 0x01010024;
+    private static final int ANDROID_FONT = 0x01010532;
+    private static final String ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android";
 
     private static Resources sSystem;
 
@@ -20,8 +33,82 @@ public class Resources
     {
         mAssetsHandle = assetsHandle;
         mAssets = new AssetManager(this, assetsHandle);
+        mResourcesImpl = new ResourcesImpl(mAssets, mMetrics, mConfiguration);
 
         if (sSystem == null && assetsHandle != 0) sSystem = this;
+    }
+
+    public Resources(AssetManager assets, DisplayMetrics metrics, Configuration config)
+    {
+        mAssets = assets == null ? new AssetManager(this, 0) : assets;
+        mAssetsHandle = mAssets.getHandle();
+        mResourcesImpl = new ResourcesImpl(mAssets, mMetrics, mConfiguration);
+
+        if (config != null) mConfiguration.setTo(config);
+        if (metrics != null) mMetrics.setTo(metrics);
+    }
+
+    ResourcesImpl getImpl()
+    {
+        return mResourcesImpl;
+    }
+
+    public ClassLoader getClassLoader()
+    {
+        return mClassLoader;
+    }
+
+    void setImpl(ResourcesImpl impl)
+    {
+        if (impl == null || impl == mResourcesImpl) return;
+
+        mConfiguration.setTo(impl.getConfiguration());
+        mMetrics.setTo(impl.getDisplayMetrics());
+        mResourcesImpl = impl;
+    }
+
+    public static int getAttributeSetSourceResId(AttributeSet set)
+    {
+        return ID_NULL;
+    }
+
+    public final void flushLayoutCache()
+    {
+    }
+
+    public final void finishPreloading()
+    {
+    }
+
+    public void addLoaders(ResourcesLoader... loaders)
+    {
+        if (loaders == null) return;
+
+        synchronized (mLoaders)
+        {
+            for (ResourcesLoader loader : loaders)
+            {
+                if (loader != null && !mLoaders.contains(loader)) mLoaders.add(loader);
+            }
+        }
+    }
+
+    public void removeLoaders(ResourcesLoader... loaders)
+    {
+        if (loaders == null) return;
+
+        synchronized (mLoaders)
+        {
+            for (ResourcesLoader loader : loaders) mLoaders.remove(loader);
+        }
+    }
+
+    java.util.List<ResourcesLoader> getLoaders()
+    {
+        synchronized (mLoaders)
+        {
+            return new java.util.ArrayList<>(mLoaders);
+        }
     }
 
     public static Resources getSystem()
@@ -78,7 +165,7 @@ public class Resources
         return copy;
     }
 
-    public Theme newTheme()
+    public final Theme newTheme()
     {
         Theme theme = new Theme(this);
         mLiveThemes.add(theme);
@@ -96,9 +183,7 @@ public class Resources
 
     public String getString(int resourceId) throws NotFoundException
     {
-        String value = nativeGetString(mAssetsHandle, resourceId);
-        if (value == null) throw new NotFoundException("String resource ID #0x" + Integer.toHexString(resourceId));
-        return value;
+        return getText(resourceId).toString();
     }
 
     public String getString(int resourceId, Object... formatArgs) throws NotFoundException
@@ -108,7 +193,86 @@ public class Resources
 
     public CharSequence getText(int resourceId) throws NotFoundException
     {
-        return getString(resourceId);
+        String value = nativeGetString(mAssetsHandle, resourceId);
+        if (value == null) throw new NotFoundException("String resource ID #0x" + Integer.toHexString(resourceId));
+        return value;
+    }
+
+    public CharSequence getText(int resourceId, CharSequence defaultValue)
+    {
+        String value = resourceId != 0 ? nativeGetString(mAssetsHandle, resourceId) : null;
+        return value != null ? value : defaultValue;
+    }
+
+    public CharSequence getQuantityText(int resourceId, int quantity) throws NotFoundException
+    {
+        int count = nativeGetArraySize(mAssetsHandle, resourceId);
+        if (count <= 0) throw new NotFoundException("Plural resource ID #0x" + Integer.toHexString(resourceId));
+
+        java.util.Locale locale = mConfiguration.getLocales().isEmpty() ? mConfiguration.locale : mConfiguration.getLocales().get(0);
+        int index = QuantityRules.entryIndex(locale, quantity, count);
+        int[] packed = nativeGetArrayEntry(mAssetsHandle, resourceId, index);
+        if (packed == null && index != 0) packed = nativeGetArrayEntry(mAssetsHandle, resourceId, 0);
+        if (packed == null)
+        {
+            throw new NotFoundException("Plural resource ID #0x" + Integer.toHexString(resourceId) + " quantity=" + quantity);
+        }
+
+        String value;
+        if (packed[0] == TypedValue.TYPE_STRING && packed[2] != 0) value = getStringOrNull(packed[2]);
+        else if (packed[0] == TypedValue.TYPE_STRING) value = nativeGetPooledString(mAssetsHandle, 0, packed[1]);
+        else value = TypedValue.coerceToString(packed[0], packed[1]);
+
+        if (value == null)
+        {
+            throw new NotFoundException("Plural resource ID #0x" + Integer.toHexString(resourceId) + " quantity=" + quantity);
+        }
+        return value;
+    }
+
+    public String getQuantityString(int resourceId, int quantity, Object... formatArgs) throws NotFoundException
+    {
+        String raw = getQuantityText(resourceId, quantity).toString();
+        return String.format(mConfiguration.locale == null ? java.util.Locale.getDefault() : mConfiguration.locale, raw, formatArgs);
+    }
+
+    public String getQuantityString(int resourceId, int quantity) throws NotFoundException
+    {
+        return getQuantityText(resourceId, quantity).toString();
+    }
+
+    public TypedArray obtainTypedArray(int resourceId) throws NotFoundException
+    {
+        int count = nativeGetArraySize(mAssetsHandle, resourceId);
+        if (count < 0) throw new NotFoundException("Array resource ID #0x" + Integer.toHexString(resourceId));
+
+        int[] attributes = new int[count];
+        int[] data = new int[count * TypedArray.STYLE_NUM_ENTRIES];
+        int[] indices = new int[count + 1];
+        String[] strings = new String[count];
+
+        for (int index = 0; index < count; index++)
+        {
+            int[] packed = nativeGetArrayEntry(mAssetsHandle, resourceId, index);
+            if (packed == null) continue;
+
+            int base = index * TypedArray.STYLE_NUM_ENTRIES;
+            data[base + TypedArray.STYLE_TYPE] = packed[0];
+            data[base + TypedArray.STYLE_DATA] = packed[1];
+            data[base + TypedArray.STYLE_RESOURCE_ID] = packed[2];
+
+            if (packed[0] == TypedValue.TYPE_STRING)
+            {
+                strings[index] = packed[2] != 0 ? getStringOrNull(packed[2]) : nativeGetPooledString(mAssetsHandle, 0, packed[1]);
+            }
+
+            if (packed[0] != TypedValue.TYPE_NULL) indices[++indices[0]] = index;
+        }
+
+        TypedArray array = new TypedArray(this);
+        array.bind(attributes, data, indices, null);
+        array.bindStrings(strings);
+        return array;
     }
 
     String getStringOrNull(int resourceId)
@@ -118,7 +282,7 @@ public class Resources
 
     String getStringForCookie(int stringIndex, int cookie)
     {
-        return nativeGetPooledString(mAssetsHandle, cookie, stringIndex);
+        return nativeGetPooledString(mAssetsHandle, cookie - 1, stringIndex);
     }
 
     public int getIdentifier(String name, String defType, String defPackage)
@@ -164,15 +328,24 @@ public class Resources
     {
         TypedValue value = new TypedValue();
         if (!fetchValue(resourceId, value)) throw new NotFoundException("Color 0x" + Integer.toHexString(resourceId));
+        if (isColorStateListFile(value)) return getColorStateList(resourceId, null).getDefaultColor();
         return value.data;
     }
 
     public int getColor(int resourceId, Theme theme) throws NotFoundException
     {
-        return getColor(resourceId);
+        TypedValue value = new TypedValue();
+        if (!fetchValue(resourceId, value)) throw new NotFoundException("Color 0x" + Integer.toHexString(resourceId));
+        if (isColorStateListFile(value)) return getColorStateList(resourceId, theme).getDefaultColor();
+        return value.data;
     }
 
     public ColorStateList getColorStateList(int resourceId) throws NotFoundException
+    {
+        return getColorStateList(resourceId, null);
+    }
+
+    public ColorStateList getColorStateList(int resourceId, Theme theme) throws NotFoundException
     {
         TypedValue value = new TypedValue();
         if (!fetchValue(resourceId, value)) throw new NotFoundException("Color state list 0x" + Integer.toHexString(resourceId));
@@ -182,13 +355,34 @@ public class Resources
             return ColorStateList.valueOf(value.data);
         }
 
-        runtime.Strict.unimplemented("Resources.getColorStateList selector 0x" + Integer.toHexString(resourceId));
-        return null;
+        String path = value.string == null ? null : value.string.toString();
+        if (path == null || !path.endsWith(".xml"))
+        {
+            throw new NotFoundException("Resource 0x" + Integer.toHexString(resourceId) + " is not a color or color state list");
+        }
+
+        XmlResourceParser parser = null;
+        try
+        {
+            parser = getXml(resourceId);
+            return ColorStateList.createFromXml(this, parser, theme);
+        }
+        catch (org.xmlpull.v1.XmlPullParserException | java.io.IOException failure)
+        {
+            NotFoundException missing = new NotFoundException("File " + path + " from color state list resource ID #0x" +
+                                                              Integer.toHexString(resourceId));
+            missing.initCause(failure);
+            throw missing;
+        }
+        finally
+        {
+            if (parser != null) parser.close();
+        }
     }
 
-    public ColorStateList getColorStateList(int resourceId, Theme theme) throws NotFoundException
+    private boolean isColorStateListFile(TypedValue value)
     {
-        return getColorStateList(resourceId);
+        return value.type == TypedValue.TYPE_STRING && value.string != null && value.string.toString().endsWith(".xml");
     }
 
     public int getInteger(int resourceId) throws NotFoundException
@@ -267,6 +461,19 @@ public class Resources
             }
         }
 
+        if (path != null && path.endsWith(".9.png"))
+        {
+            try (java.io.InputStream stream = getAssets().openNonAsset(path))
+            {
+                Drawable patch = Drawable.createFromResourceStream(this, value, stream, path);
+                if (patch != null) return patch;
+            }
+            catch (Exception failure)
+            {
+                android.util.Log.w("Resources", "cannot read nine-patch " + path + ": " + failure);
+            }
+        }
+
         if (path != null)
         {
             android.graphics.Bitmap bitmap = getBitmap(resourceId);
@@ -342,6 +549,187 @@ public class Resources
     public Drawable getDrawable(int resourceId, Theme theme)
     {
         return getDrawable(resourceId);
+    }
+
+    public Drawable getDrawableForDensity(int resourceId, int density) throws NotFoundException
+    {
+        return getDrawableForDensity(resourceId, density, null);
+    }
+
+    public Drawable getDrawableForDensity(int resourceId, int density, Theme theme)
+    {
+        return getDrawable(resourceId, theme);
+    }
+
+    public float getFraction(int resourceId, int base, int pbase)
+    {
+        TypedValue value = new TypedValue();
+        if (!fetchValue(resourceId, value) || value.type != TypedValue.TYPE_FRACTION)
+        {
+            throw new NotFoundException("Resource ID #0x" + Integer.toHexString(resourceId) + " type #0x"
+                                        + Integer.toHexString(value.type) + " is not valid");
+        }
+        return TypedValue.complexToFraction(value.data, base, pbase);
+    }
+
+    public android.graphics.Movie getMovie(int resourceId) throws NotFoundException
+    {
+        java.io.InputStream stream = openRawResource(resourceId);
+
+        try
+        {
+            return android.graphics.Movie.decodeStream(stream);
+        }
+        finally
+        {
+            try
+            {
+                stream.close();
+            }
+            catch (java.io.IOException failure)
+            {
+                android.util.Log.w("Resources", "cannot close movie stream: " + failure);
+            }
+        }
+    }
+
+    public android.graphics.Typeface getFont(int resourceId) throws NotFoundException
+    {
+        TypedValue value = new TypedValue();
+        if (!fetchValue(resourceId, value) || value.string == null)
+        {
+            throw new NotFoundException("Font resource ID #0x" + Integer.toHexString(resourceId));
+        }
+
+        String path = value.string.toString();
+
+        if (!path.endsWith(".xml"))
+        {
+            android.graphics.Typeface typeface = new android.graphics.Typeface.Builder(getAssets(), path, false, 0).build();
+            if (typeface != null) return typeface;
+            throw new NotFoundException("Font resource ID #0x" + Integer.toHexString(resourceId) + " could not be retrieved.");
+        }
+
+        int fontResource = 0;
+        XmlResourceParser parser = null;
+
+        try
+        {
+            parser = getXml(resourceId);
+            int type;
+            while ((type = parser.next()) != XmlPullParser.END_DOCUMENT)
+            {
+                if (type != XmlPullParser.START_TAG || !"font".equals(parser.getName())) continue;
+
+                int candidate = 0;
+                for (int index = 0; index < parser.getAttributeCount(); index++)
+                {
+                    if (parser.getAttributeNameResource(index) == ANDROID_FONT || "font".equals(parser.getAttributeName(index)))
+                    {
+                        candidate = parser.getAttributeResourceValue(index, 0);
+                        if (candidate != 0) break;
+                    }
+                }
+
+                if (candidate == 0) continue;
+
+                String weight = parser.getAttributeValue(ANDROID_NAMESPACE, "fontWeight");
+                String style = parser.getAttributeValue(ANDROID_NAMESPACE, "fontStyle");
+                boolean regular = (weight == null || "400".equals(weight)) && (style == null || "0".equals(style) || "normal".equals(style));
+                if (fontResource == 0 || regular) fontResource = candidate;
+                if (regular) break;
+            }
+        }
+        catch (XmlPullParserException | java.io.IOException failure)
+        {
+            NotFoundException missing = new NotFoundException("Font resource ID #0x" + Integer.toHexString(resourceId));
+            missing.initCause(failure);
+            throw missing;
+        }
+        finally
+        {
+            if (parser != null) parser.close();
+        }
+
+        if (fontResource == 0 || fontResource == resourceId)
+        {
+            throw new NotFoundException("Font resource ID #0x" + Integer.toHexString(resourceId) + " could not be retrieved.");
+        }
+
+        return getFont(fontResource);
+    }
+
+    public void parseBundleExtras(XmlResourceParser parser, Bundle outBundle) throws XmlPullParserException, java.io.IOException
+    {
+        int outerDepth = parser.getDepth();
+        int type;
+
+        while ((type = parser.next()) != XmlPullParser.END_DOCUMENT && (type != XmlPullParser.END_TAG || parser.getDepth() > outerDepth))
+        {
+            if (type == XmlPullParser.END_TAG || type == XmlPullParser.TEXT) continue;
+
+            if ("extra".equals(parser.getName())) parseBundleExtra("extra", parser, outBundle);
+
+            skipCurrentTag(parser);
+        }
+    }
+
+    private static void skipCurrentTag(XmlPullParser parser) throws XmlPullParserException, java.io.IOException
+    {
+        int outerDepth = parser.getDepth();
+        int type;
+
+        while ((type = parser.next()) != XmlPullParser.END_DOCUMENT && (type != XmlPullParser.END_TAG || parser.getDepth() > outerDepth))
+        {
+        }
+    }
+
+    public void parseBundleExtra(String tagName, AttributeSet attrs, Bundle outBundle) throws XmlPullParserException
+    {
+        TypedArray array = obtainAttributes(attrs, new int[] {ANDROID_NAME, ANDROID_VALUE});
+
+        try
+        {
+            String name = array.getString(0);
+            if (name == null) name = attrs.getAttributeValue(ANDROID_NAMESPACE, "name");
+            if (name == null)
+            {
+                throw new XmlPullParserException("<" + tagName + "> requires an android:name attribute at " + attrs.getPositionDescription());
+            }
+
+            TypedValue value = array.peekValue(1);
+            if (value == null)
+            {
+                throw new XmlPullParserException("<" + tagName + "> requires an android:value or android:resource attribute at "
+                                                 + attrs.getPositionDescription());
+            }
+
+            if (value.type == TypedValue.TYPE_STRING)
+            {
+                outBundle.putCharSequence(name, value.string);
+            }
+            else if (value.type == TypedValue.TYPE_INT_BOOLEAN)
+            {
+                outBundle.putBoolean(name, value.data != 0);
+            }
+            else if (value.type >= TypedValue.TYPE_FIRST_INT && value.type <= TypedValue.TYPE_LAST_INT)
+            {
+                outBundle.putInt(name, value.data);
+            }
+            else if (value.type == TypedValue.TYPE_FLOAT)
+            {
+                outBundle.putFloat(name, value.getFloat());
+            }
+            else
+            {
+                throw new XmlPullParserException("<" + tagName + "> only supports string, integer, float, color, and boolean at "
+                                                 + attrs.getPositionDescription());
+            }
+        }
+        finally
+        {
+            array.recycle();
+        }
     }
 
     public void getValue(int resourceId, TypedValue outValue, boolean resolveRefs) throws NotFoundException
@@ -429,7 +817,18 @@ public class Resources
         return new XmlBlock.Parser(this, handle);
     }
 
+    XmlResourceParser openXmlBuffer(byte[] data)
+    {
+        long handle = nativeOpenXmlBuffer(mAssetsHandle, data);
+        return handle == 0 ? null : new XmlBlock.Parser(this, handle);
+    }
+
     public XmlResourceParser getXml(int resourceId) throws NotFoundException
+    {
+        return getLayout(resourceId);
+    }
+
+    public XmlResourceParser getAnimation(int resourceId) throws NotFoundException
     {
         return getLayout(resourceId);
     }
@@ -460,6 +859,8 @@ public class Resources
 
     private static native long nativeOpenXmlResource(long assetsHandle, int resourceId);
 
+    private static native long nativeOpenXmlBuffer(long assetsHandle, byte[] data);
+
     private static native void nativeObtainNoTheme(long assetsHandle, long xmlHandle, int[] attributes, int[] outValues, int[] outIndices);
 
     public static class NotFoundException extends RuntimeException
@@ -471,6 +872,11 @@ public class Resources
         public NotFoundException(String message)
         {
             super(message);
+        }
+
+        public NotFoundException(String message, Exception cause)
+        {
+            super(message, cause);
         }
     }
 
@@ -489,6 +895,32 @@ public class Resources
         public Resources getResources()
         {
             return mOwner;
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (this == other) return true;
+            if (!(other instanceof Theme)) return false;
+
+            Theme that = (Theme)other;
+            if (mOwner != that.mOwner || mAppliedStyles.size() != that.mAppliedStyles.size()) return false;
+
+            for (int index = 0; index < mAppliedStyles.size(); index++)
+            {
+                if (!java.util.Arrays.equals(mAppliedStyles.get(index), that.mAppliedStyles.get(index))) return false;
+            }
+
+            return true;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            int hash = System.identityHashCode(mOwner);
+            for (int[] style : mAppliedStyles) hash = 31 * hash + java.util.Arrays.hashCode(style);
+
+            return hash;
         }
 
         long getHandle()
@@ -564,7 +996,7 @@ public class Resources
 
         public TypedArray obtainStyledAttributes(AttributeSet set, int[] attributes, int defStyleAttr, int defStyleRes)
         {
-            TypedArray array = new TypedArray(mOwner);
+            TypedArray array = new TypedArray(mOwner, this);
 
             int[] data = new int[attributes.length * TypedArray.STYLE_NUM_ENTRIES];
             int[] indices = new int[attributes.length + 1];
@@ -575,6 +1007,43 @@ public class Resources
 
             array.bind(attributes, data, indices, parser);
             return array;
+        }
+
+        public Drawable getDrawable(int resourceId) throws NotFoundException
+        {
+            return mOwner.getDrawable(resourceId, this);
+        }
+
+        public int getChangingConfigurations()
+        {
+            return 0;
+        }
+
+        public void dump(int priority, String tag, String prefix)
+        {
+            android.util.Log.println(priority, tag, prefix + toString());
+        }
+
+        public int getExplicitStyle(AttributeSet set)
+        {
+            return set == null ? ID_NULL : set.getStyleAttribute();
+        }
+
+        public int[] getAttributeResolutionStack(int defStyleAttr, int defStyleRes, int explicitStyleRes)
+        {
+            return new int[0];
+        }
+
+        @Override
+        public String toString()
+        {
+            StringBuilder styles = new StringBuilder();
+            for (int[] applied : mAppliedStyles)
+            {
+                if (styles.length() > 0) styles.append(", ");
+                styles.append("0x").append(Integer.toHexString(applied[0]));
+            }
+            return "Theme{" + styles + "}";
         }
     }
 

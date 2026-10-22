@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include "Apk/Apk.hpp"
 #include "GuestRuntime/GuestRuntime.hpp"
 #include "JniBridge/JniBridge.hpp"
 
@@ -79,6 +80,7 @@ namespace NativeActivity
     Result RegisterWindowFunctions(GuestRuntime::Instance& runtime);
 
     Result RegisterAudioFunctions(GuestRuntime::Instance& runtime);
+    Result RegisterAssetFunctions(GuestRuntime::Instance& runtime, const Apk::Package& package);
     void PrepareLooper();
     bool ServiceLooper();
     Result CreateWindow(GuestRuntime::Instance& runtime, int32_t width, int32_t height, GuestState::GuestAddress& window);

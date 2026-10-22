@@ -198,6 +198,22 @@ static void ReportFaultingInstruction(void* context)
             (unsigned long long)instruction);
 }
 
+static bool FaultCameFromGuestCode(void* context)
+{
+    if (gRecompiledEntry != 0) return true;
+
+    ucontext_t* machine = (ucontext_t*)context;
+    if (!machine) return true;
+
+    uint64_t instruction = (uint64_t)machine->uc_mcontext.gregs[REG_RIP];
+
+    Dl_info described{};
+    if (dladdr((void*)instruction, &described) == 0) return true;
+
+    uint64_t guestEntry = 0;
+    return TranslatedSymbolEntry(described.dli_sname, guestEntry);
+}
+
 static void ReportGuestFault(int signalNumber, siginfo_t* information, void* context)
 {
     uint64_t address = (uint64_t)information->si_addr;
@@ -210,6 +226,12 @@ static void ReportGuestFault(int signalNumber, siginfo_t* information, void* con
     {
         GuestRuntime::FaultHandler handler = gFaultHandler.load(std::memory_order_acquire);
         if (handler && handler(gFaultHandlerContext.load(std::memory_order_relaxed), signalNumber, information)) return;
+    }
+
+    if (!insideArena && !FaultCameFromGuestCode(context))
+    {
+        ChainToPrevious(signalNumber, information, context);
+        return;
     }
 
     if (insideArena)
@@ -954,6 +976,20 @@ static bool DecodeRegion(GuestRuntimeState* state, uint64_t address, Ir::Functio
     }
 
     region.blocks = std::move(lowerable);
+
+    std::unordered_set<uint64_t> returnPoints;
+    for (const Ir::Block& block : region.blocks)
+    {
+        if (block.instructions.empty() || block.instructions.back().opcode != Ir::Opcode::Call) continue;
+        if (block.successorFallthrough != Ir::NO_SUCCESSOR) returnPoints.insert((uint64_t)block.successorFallthrough);
+    }
+
+    for (Ir::Block& block : region.blocks)
+    {
+        uint64_t blockAddress = (uint64_t)block.guestAddress;
+        block.externalEntry = blockAddress == address || returnPoints.count(blockAddress) != 0;
+    }
+
     return Ir::Verify(region);
 }
 
@@ -1012,6 +1048,7 @@ static NativeEntry RecompileAt(GuestRuntimeState* state, uint64_t address)
         if (epoch != state->invalidationEpoch || raced != state->nativeEntries.end())
         {
             if (built) LlvmBackend::ReleaseFunction(state->backend, compiled);
+            if (raced == state->nativeEntries.end()) Bump(state->statistics.recompilesDiscarded);
             return raced != state->nativeEntries.end() ? raced->second : NativeEntry{};
         }
 
@@ -1040,6 +1077,7 @@ static NativeEntry RecompileAt(GuestRuntimeState* state, uint64_t address)
 
                 record.blockAddresses.push_back(blockAddress);
 
+                if (!block.externalEntry && index != 0) continue;
                 if (state->nativeEntries.count(blockAddress) != 0) continue;
 
                 NativeEntry published;
@@ -1230,6 +1268,71 @@ static void EnsureFaultStack()
     described.ss_size = reserved.size();
 
     sigaltstack(&described, nullptr);
+}
+
+struct GuestStackBoundsScope
+{
+    uint64_t previousTop = gGuestStackTop;
+    uint64_t previousBytes = gGuestStackBytes;
+
+    ~GuestStackBoundsScope()
+    {
+        gGuestStackTop = previousTop;
+        gGuestStackBytes = previousBytes;
+    }
+};
+
+static thread_local GuestRuntimeState* gHostThreadPointerOwner = nullptr;
+static thread_local uint64_t gHostThreadPointer = 0;
+
+static GuestRuntime::Result ThreadPointerForHostThread(GuestRuntimeState* state, uint64_t& pointer)
+{
+    if (gHostThreadPointerOwner == state && gHostThreadPointer != 0)
+    {
+        pointer = gHostThreadPointer;
+        return GuestRuntime::Result::Ok;
+    }
+
+    GuestRuntime::Instance instance;
+    instance.implementation = state;
+
+    uint64_t chosen = 0;
+    {
+        std::lock_guard<std::mutex> guard(state->threadMutex);
+        if (state->mainThreadPointer == 0)
+        {
+            GuestState::GuestAddress allocated{};
+            GuestRuntime::Result result = GuestRuntime::AllocateThreadPointer(instance, allocated);
+            if (result != GuestRuntime::Result::Ok)
+            {
+                instance.implementation = nullptr;
+                return result;
+            }
+
+            state->mainThreadPointer = (uint64_t)allocated;
+            chosen = state->mainThreadPointer;
+        }
+    }
+
+    if (chosen == 0)
+    {
+        GuestState::GuestAddress allocated{};
+        GuestRuntime::Result result = GuestRuntime::AllocateThreadPointer(instance, allocated);
+        if (result != GuestRuntime::Result::Ok)
+        {
+            instance.implementation = nullptr;
+            return result;
+        }
+
+        chosen = (uint64_t)allocated;
+    }
+
+    instance.implementation = nullptr;
+
+    gHostThreadPointerOwner = state;
+    gHostThreadPointer = chosen;
+    pointer = chosen;
+    return GuestRuntime::Result::Ok;
 }
 
 struct ActiveRegisterScope
@@ -1641,6 +1744,9 @@ static GuestRuntime::Result CallGuestIn(GuestRuntimeState* state, GuestState::Gu
 {
     if (!state) return GuestRuntime::Result::ArenaUnavailable;
 
+    GuestState::Registers* outer = gActiveState == state ? gActiveRegisters : nullptr;
+
+    GuestStackBoundsScope stackBounds;
     BorrowedStack borrowed;
     CallTokenScope token;
     ActiveRegisterScope active(state, registers);
@@ -1672,23 +1778,15 @@ static GuestRuntime::Result CallGuestIn(GuestRuntimeState* state, GuestState::Gu
             memcpy(HostAddress(state, registers.stackPointer + (uint64_t)index * sizeof(uint64_t)), &stackWords[index], sizeof(uint64_t));
     }
 
+    if (registers.threadPointer == 0 && outer && outer->threadPointer != 0) registers.threadPointer = outer->threadPointer;
+
     if (registers.threadPointer == 0)
     {
-        std::lock_guard<std::mutex> guard(state->threadMutex);
-        if (state->mainThreadPointer == 0)
-        {
-            GuestRuntime::Instance instance;
-            instance.implementation = state;
+        uint64_t pointer = 0;
+        GuestRuntime::Result allocated = ThreadPointerForHostThread(state, pointer);
+        if (allocated != GuestRuntime::Result::Ok) return allocated;
 
-            GuestState::GuestAddress pointer{};
-            GuestRuntime::Result allocated = GuestRuntime::AllocateThreadPointer(instance, pointer);
-            instance.implementation = nullptr;
-
-            if (allocated != GuestRuntime::Result::Ok) return allocated;
-            state->mainThreadPointer = (uint64_t)pointer;
-        }
-
-        registers.threadPointer = state->mainThreadPointer;
+        registers.threadPointer = pointer;
     }
 
     registers.general[30] = GuestRuntime::SENTINEL_RETURN_ADDRESS;
@@ -1713,8 +1811,9 @@ static GuestRuntime::Result CallGuestIn(GuestRuntimeState* state, GuestState::Gu
                 const AbiBridge::Trampoline* trampoline = AbiBridge::LookupTrampoline(state->registry, (GuestState::GuestAddress)cursor);
 
                 char described[1024];
-                snprintf(described, sizeof(described), "[hostcall %d] %s(%016llx%s, %016llx%s, %016llx%s) from %s",
-                         (int)syscall(SYS_gettid), trampoline ? trampoline->symbolName.c_str() : "?",
+                snprintf(described, sizeof(described), "[hostcall %d sp=%llx] %s(%016llx%s, %016llx%s, %016llx%s) from %s",
+                         (int)syscall(SYS_gettid), (unsigned long long)registers.stackPointer,
+                         trampoline ? trampoline->symbolName.c_str() : "?",
                          (unsigned long long)registers.general[0], DescribeGuestText(state, registers.general[0]).c_str(),
                          (unsigned long long)registers.general[1], DescribeGuestText(state, registers.general[1]).c_str(),
                          (unsigned long long)registers.general[2], DescribeGuestText(state, registers.general[2]).c_str(),
@@ -1912,6 +2011,40 @@ static GuestRuntime::Result CallGuestIn(GuestRuntimeState* state, GuestState::Gu
                     Interpreter::ExitReasonName(status.reason), (unsigned long long)status.faultAddress);
         }
 
+        fprintf(stderr, "[guestruntime] the fault is in %s, called from %s\n", DescribeGuestAddress(state, cursor).c_str(),
+                DescribeGuestAddress(state, registers.general[30]).c_str());
+        fprintf(stderr, "[guestruntime] sp %016llx, this thread's guest stack spans %016llx-%016llx\n",
+                (unsigned long long)registers.stackPointer, (unsigned long long)(gGuestStackTop - gGuestStackBytes),
+                (unsigned long long)gGuestStackTop);
+        fprintf(stderr, "[guestruntime] guest backtrace:%s\n", DescribeGuestBacktrace(state, registers).c_str());
+
+        uint64_t frame = registers.general[29];
+        std::string previous;
+        uint64_t repeats = 0;
+        for (int depth = 0; depth < 4096 && frame != 0; ++depth)
+        {
+            uint64_t record[2] = {0, 0};
+            if (!state->memory.Read(state->memory.context, (GuestState::GuestAddress)frame, record, sizeof(record))) break;
+
+            std::string described = DescribeGuestAddress(state, record[1]);
+            if (described == previous)
+            {
+                repeats += 1;
+            }
+            else
+            {
+                if (repeats != 0) fprintf(stderr, "[guestruntime]   ... repeated %llu more time(s)\n", (unsigned long long)repeats);
+                fprintf(stderr, "[guestruntime]   frame %d returns to %s\n", depth, described.c_str());
+                previous = described;
+                repeats = 0;
+            }
+
+            if (record[0] <= frame) break;
+            frame = record[0];
+        }
+
+        if (repeats != 0) fprintf(stderr, "[guestruntime]   ... repeated %llu more time(s)\n", (unsigned long long)repeats);
+
         return GuestRuntime::Result::GuestFaulted;
     }
 }
@@ -1927,11 +2060,36 @@ static bool EnterGuestWithStackCallback(void* context, GuestState::GuestAddress 
     return CallGuestIn((GuestRuntimeState*)context, guestAddress, registers, stackWords, stackWordCount) == GuestRuntime::Result::Ok;
 }
 
+static constexpr uint32_t GUEST_BREAKPOINT_ENCODING = 0xd4200000u;
+
+static void MapSentinelReturnPage(uint64_t pageBytes)
+{
+    static std::once_flag mapped;
+    std::call_once(mapped, [pageBytes]() {
+        void* wanted = (void*)GuestRuntime::SENTINEL_RETURN_ADDRESS;
+        void* page = mmap(wanted, (size_t)pageBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        if (page == MAP_FAILED || page != wanted)
+        {
+            if (page != MAP_FAILED) munmap(page, (size_t)pageBytes);
+            fprintf(stderr, "[guestruntime] the sentinel return address cannot be backed by a readable page, so guest code that "
+                            "reads its own return address will fault\n");
+            return;
+        }
+
+        uint32_t* words = (uint32_t*)page;
+        for (uint64_t index = 0; index < pageBytes / sizeof(uint32_t); ++index) words[index] = GUEST_BREAKPOINT_ENCODING;
+
+        mprotect(page, (size_t)pageBytes, PROT_READ);
+    });
+}
+
 GuestRuntime::Result GuestRuntime::Create(const Configuration& configuration, Instance& instance)
 {
     GuestRuntimeState* state = new GuestRuntimeState();
     state->configuration = configuration;
     state->pageBytes = Platform::HostPageBytes();
+
+    MapSentinelReturnPage(state->pageBytes);
 
     uint64_t length = RoundUpTo(configuration.arenaLength, state->pageBytes);
 
@@ -2534,6 +2692,7 @@ static uint64_t InvalidateRange(GuestRuntimeState* state, uint64_t start, uint64
     if (end <= state->codeLowAddress || start >= state->codeHighAddress) return dropped;
 
     state->invalidationEpoch += 1;
+    Bump(state->statistics.codeInvalidations);
 
     for (auto entry = state->blocks.begin(); entry != state->blocks.end();)
     {

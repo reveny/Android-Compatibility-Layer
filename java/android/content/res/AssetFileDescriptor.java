@@ -1,16 +1,37 @@
 package android.content.res;
 
 import android.os.Bundle;
+import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
+import android.os.Parcelable;
 import java.io.Closeable;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 
-public class AssetFileDescriptor implements Closeable
+public class AssetFileDescriptor implements Parcelable, Closeable
 {
     public static final long UNKNOWN_LENGTH = -1;
+
+    public static final Parcelable.Creator<AssetFileDescriptor> CREATOR = new Parcelable.Creator<AssetFileDescriptor>()
+    {
+        @Override
+        public AssetFileDescriptor createFromParcel(Parcel source)
+        {
+            ParcelFileDescriptor descriptor = ParcelFileDescriptor.CREATOR.createFromParcel(source);
+            long startOffset = source.readLong();
+            long length = source.readLong();
+            Bundle extras = source.readInt() != 0 ? source.readBundle() : null;
+            return new AssetFileDescriptor(descriptor, startOffset, length, extras);
+        }
+
+        @Override
+        public AssetFileDescriptor[] newArray(int size)
+        {
+            return new AssetFileDescriptor[size];
+        }
+    };
 
     private final ParcelFileDescriptor mDescriptor;
     private final long mStartOffset;
@@ -81,6 +102,29 @@ public class AssetFileDescriptor implements Closeable
     public void close() throws IOException
     {
         mDescriptor.close();
+    }
+
+    @Override
+    public int describeContents()
+    {
+        return mDescriptor.describeContents();
+    }
+
+    @Override
+    public void writeToParcel(Parcel destination, int flags)
+    {
+        mDescriptor.writeToParcel(destination, flags);
+        destination.writeLong(mStartOffset);
+        destination.writeLong(mLength);
+        if (mExtras != null)
+        {
+            destination.writeInt(1);
+            destination.writeBundle(mExtras);
+        }
+        else
+        {
+            destination.writeInt(0);
+        }
     }
 
     @Override

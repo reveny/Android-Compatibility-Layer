@@ -25,6 +25,33 @@ public final class ArraySet<E> implements Collection<E>, Set<E>
         if (source != null) addAll(source);
     }
 
+    public ArraySet(ArraySet<E> source)
+    {
+        if (source != null) addAll((Collection<? extends E>)source);
+    }
+
+    public ArraySet(E[] source)
+    {
+        if (source == null) return;
+
+        for (E value : source) add(value);
+    }
+
+    public void ensureCapacity(int capacity)
+    {
+        mOrder.ensureCapacity(capacity);
+    }
+
+    public void addAll(ArraySet<? extends E> source)
+    {
+        addAll((Collection<? extends E>)source);
+    }
+
+    public boolean removeAll(ArraySet<? extends E> source)
+    {
+        return removeAll((Collection<?>)source);
+    }
+
     @Override
     public int size()
     {

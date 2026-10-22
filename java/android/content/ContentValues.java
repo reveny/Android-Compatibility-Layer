@@ -4,16 +4,69 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
-public class ContentValues
+public final class ContentValues implements android.os.Parcelable
 {
-    private final Map<String, Object> mValues = new LinkedHashMap<>();
+    public static final String TAG = "ContentValues";
+
+    public static final android.os.Parcelable.Creator<ContentValues> CREATOR = new android.os.Parcelable.Creator<ContentValues>()
+    {
+        @Override
+        public ContentValues createFromParcel(android.os.Parcel source)
+        {
+            ContentValues values = new ContentValues();
+            int count = source.readInt();
+
+            for (int index = 0; index < count; index++)
+            {
+                String key = source.readString();
+                values.mValues.put(key, source.readValue(null));
+            }
+
+            return values;
+        }
+
+        @Override
+        public ContentValues[] newArray(int size)
+        {
+            return new ContentValues[size];
+        }
+    };
+
+    private final Map<String, Object> mValues;
 
     public ContentValues()
     {
+        mValues = new LinkedHashMap<>();
+    }
+
+    public ContentValues(int size)
+    {
+        if (size < 0) throw new IllegalArgumentException("Initial size must be non-negative");
+
+        mValues = new LinkedHashMap<>(size);
+    }
+
+    @Override
+    public int describeContents()
+    {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(android.os.Parcel destination, int flags)
+    {
+        destination.writeInt(mValues.size());
+
+        for (Map.Entry<String, Object> entry : mValues.entrySet())
+        {
+            destination.writeString(entry.getKey());
+            destination.writeValue(entry.getValue());
+        }
     }
 
     public ContentValues(ContentValues from)
     {
+        mValues = new LinkedHashMap<>();
         if (from != null) mValues.putAll(from.mValues);
     }
 
@@ -58,6 +111,11 @@ public class ContentValues
     }
 
     public void put(String key, byte[] value)
+    {
+        mValues.put(key, value);
+    }
+
+    public void putObject(String key, Object value)
     {
         mValues.put(key, value);
     }

@@ -66,6 +66,8 @@ namespace GuestRuntime
         uint64_t blocksRecompiled = 0;
         uint64_t regionsRecompiled = 0;
         uint64_t recompileFailures = 0;
+        uint64_t recompilesDiscarded = 0;
+        uint64_t codeInvalidations = 0;
         uint64_t blocksExecutedNative = 0;
         uint64_t codeWritesObserved = 0;
         uint64_t blocksInterpreted = 0;

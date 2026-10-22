@@ -54,20 +54,12 @@ public final class StrictMode
 
     public interface OnThreadViolationListener
     {
-        void onThreadViolation(Violation violation);
+        void onThreadViolation(android.os.strictmode.Violation violation);
     }
 
     public interface OnVmViolationListener
     {
-        void onVmViolation(Violation violation);
-    }
-
-    public static class Violation extends Throwable
-    {
-        Violation(String message)
-        {
-            super(message);
-        }
+        void onVmViolation(android.os.strictmode.Violation violation);
     }
 
     public static final class ThreadPolicy

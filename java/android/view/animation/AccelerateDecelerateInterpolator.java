@@ -1,10 +1,21 @@
 package android.view.animation;
 
-public class AccelerateDecelerateInterpolator implements Interpolator
+import android.content.Context;
+import android.util.AttributeSet;
+
+public class AccelerateDecelerateInterpolator extends BaseInterpolator
 {
+    public AccelerateDecelerateInterpolator()
+    {
+    }
+
+    public AccelerateDecelerateInterpolator(Context context, AttributeSet attributes)
+    {
+    }
+
     @Override
     public float getInterpolation(float input)
     {
-        return (float)(Math.cos((input+1)*Math.PI)/2.0f)+0.5f;
+        return (float)(Math.cos((input + 1) * Math.PI) / 2.0f) + 0.5f;
     }
 }

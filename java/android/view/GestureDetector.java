@@ -97,6 +97,8 @@ public class GestureDetector
 
     private final OnGestureListener mListener;
     private OnDoubleTapListener mDoubleTapListener;
+    private OnContextClickListener mContextClickListener;
+    private boolean mInContextClick;
     private final Handler mHandler;
 
     private final int mTouchSlop;
@@ -131,19 +133,40 @@ public class GestureDetector
         }
     };
 
+    @Deprecated
+    public GestureDetector(OnGestureListener listener, Handler handler)
+    {
+        this(null, listener, handler);
+    }
+
+    @Deprecated
+    public GestureDetector(OnGestureListener listener)
+    {
+        this(null, listener, null);
+    }
+
     public GestureDetector(Context context, OnGestureListener listener)
     {
         this(context, listener, null);
     }
 
+    public GestureDetector(Context context, OnGestureListener listener, Handler handler, boolean unused)
+    {
+        this(context, listener, handler);
+    }
+
     public GestureDetector(Context context, OnGestureListener listener, Handler handler)
     {
-        if (listener == null) throw new NullPointerException("a gesture detector needs a listener");
+        if (listener == null) throw new NullPointerException("OnGestureListener must not be null");
 
         mListener = listener;
-        mHandler = handler != null ? handler : new Handler(android.os.Looper.getMainLooper());
+
+        android.os.Looper looper = handler != null ? handler.getLooper() : android.os.Looper.myLooper();
+        if (looper == null) looper = android.os.Looper.getMainLooper();
+        mHandler = new Handler(looper);
 
         if (listener instanceof OnDoubleTapListener) mDoubleTapListener = (OnDoubleTapListener)listener;
+        if (listener instanceof OnContextClickListener) mContextClickListener = (OnContextClickListener)listener;
 
         ViewConfiguration configuration = ViewConfiguration.get(context);
 
@@ -156,6 +179,46 @@ public class GestureDetector
     public void setOnDoubleTapListener(OnDoubleTapListener listener)
     {
         mDoubleTapListener = listener;
+    }
+
+    public void setContextClickListener(OnContextClickListener onContextClickListener)
+    {
+        mContextClickListener = onContextClickListener;
+    }
+
+    public boolean onGenericMotionEvent(MotionEvent event)
+    {
+        if (event == null) return false;
+
+        int actionButton = event.getActionButton();
+
+        switch (event.getActionMasked())
+        {
+            case MotionEvent.ACTION_BUTTON_PRESS:
+                if (mContextClickListener != null && !mInContextClick && !mInLongPress
+                    && (actionButton == MotionEvent.BUTTON_STYLUS_PRIMARY || actionButton == MotionEvent.BUTTON_SECONDARY))
+                {
+                    if (mContextClickListener.onContextClick(event))
+                    {
+                        mInContextClick = true;
+                        mHandler.removeCallbacks(mLongPressRunnable);
+                        return true;
+                    }
+                }
+                break;
+
+            case MotionEvent.ACTION_BUTTON_RELEASE:
+                if (mInContextClick && (actionButton == MotionEvent.BUTTON_STYLUS_PRIMARY || actionButton == MotionEvent.BUTTON_SECONDARY))
+                {
+                    mInContextClick = false;
+                }
+                break;
+
+            default:
+                break;
+        }
+
+        return false;
     }
 
     public void setIsLongpressEnabled(boolean enabled)

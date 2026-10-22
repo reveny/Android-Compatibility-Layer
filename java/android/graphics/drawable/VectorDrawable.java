@@ -1,12 +1,15 @@
 package android.graphics.drawable;
 
+import android.content.res.ColorStateList;
 import android.content.res.Resources;
+import android.graphics.BlendMode;
 import android.graphics.Canvas;
+import android.graphics.ColorFilter;
+import android.graphics.Insets;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffColorFilter;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.util.AttributeSet;
 import android.util.PathParser;
@@ -19,16 +22,22 @@ public class VectorDrawable extends Drawable
 {
     private static final String[] FILL_TYPE_NAMES = {"nonZero", "evenOdd"};
 
-    private final Group mRoot = new Group();
     private final Paint mPaint = new Paint();
 
+    private Group mRoot = new Group();
     private int mResourceId;
     private float mViewportWidth;
     private float mViewportHeight;
     private int mIntrinsicWidth;
     private int mIntrinsicHeight;
-    private int mTint;
-    private boolean mTinted;
+    private int mRootAlpha = 255;
+    private boolean mAutoMirrored;
+    private Insets mOpticalInsets = Insets.NONE;
+    private ColorStateList mTint;
+    private BlendMode mTintBlendMode = BlendMode.SRC_IN;
+    private int mTintColor;
+    private ColorFilter mColorFilter;
+    private boolean mMutated;
 
     public VectorDrawable()
     {
@@ -59,16 +68,122 @@ public class VectorDrawable extends Drawable
     }
 
     @Override
-    public void setTint(int tint)
+    public Insets getOpticalInsets()
     {
-        mTint = tint;
-        mTinted = true;
+        return mOpticalInsets;
     }
 
     @Override
-    public void setTintList(android.content.res.ColorStateList tintList)
+    public int getAlpha()
     {
-        if (tintList != null) setTint(tintList.getDefaultColor());
+        return mRootAlpha;
+    }
+
+    @Override
+    public void setAlpha(int alpha)
+    {
+        if (mRootAlpha == alpha) return;
+
+        mRootAlpha = alpha;
+        invalidateSelf();
+    }
+
+    @Override
+    public void setColorFilter(ColorFilter filter)
+    {
+        mColorFilter = filter;
+        invalidateSelf();
+    }
+
+    @Override
+    public ColorFilter getColorFilter()
+    {
+        return mColorFilter;
+    }
+
+    @Override
+    public void setTintList(ColorStateList tint)
+    {
+        mTint = tint;
+        updateTintColor(getState());
+        invalidateSelf();
+    }
+
+    @Override
+    public void setTintBlendMode(BlendMode blendMode)
+    {
+        mTintBlendMode = blendMode == null ? BlendMode.SRC_IN : blendMode;
+        invalidateSelf();
+    }
+
+    private void updateTintColor(int[] stateSet)
+    {
+        if (mTint != null) mTintColor = mTint.getColorForState(stateSet, mTint.getDefaultColor());
+    }
+
+    @Override
+    public boolean isStateful()
+    {
+        return mTint != null && mTint.isStateful();
+    }
+
+    @Override
+    public boolean hasFocusStateSpecified()
+    {
+        return hasFocusState(mTint);
+    }
+
+    @Override
+    protected boolean onStateChange(int[] stateSet)
+    {
+        if (mTint == null || !mTint.isStateful()) return false;
+
+        int previous = mTintColor;
+        updateTintColor(stateSet);
+
+        if (previous == mTintColor) return false;
+
+        invalidateSelf();
+        return true;
+    }
+
+    @Override
+    public int getOpacity()
+    {
+        return mRootAlpha == 0 ? PixelFormat.TRANSPARENT : PixelFormat.TRANSLUCENT;
+    }
+
+    @Override
+    public boolean canApplyTheme()
+    {
+        return false;
+    }
+
+    @Override
+    public void applyTheme(Resources.Theme theme)
+    {
+        super.applyTheme(theme);
+    }
+
+    @Override
+    public int getChangingConfigurations()
+    {
+        return super.getChangingConfigurations();
+    }
+
+    @Override
+    public void setAutoMirrored(boolean mirrored)
+    {
+        if (mAutoMirrored == mirrored) return;
+
+        mAutoMirrored = mirrored;
+        invalidateSelf();
+    }
+
+    @Override
+    public boolean isAutoMirrored()
+    {
+        return mAutoMirrored;
     }
 
     public boolean isEmpty()
@@ -77,22 +192,49 @@ public class VectorDrawable extends Drawable
     }
 
     @Override
-    public void inflate(Resources resources, XmlPullParser parser, AttributeSet attributes) throws java.io.IOException,
-        org.xmlpull.v1.XmlPullParserException
+    public Drawable mutate()
     {
+        mMutated = true;
+        return this;
+    }
+
+    @Override
+    public ConstantState getConstantState()
+    {
+        return new VectorState(this);
+    }
+
+    @Override
+    public void inflate(Resources resources, XmlPullParser parser, AttributeSet attributes, Resources.Theme theme)
+        throws java.io.IOException, org.xmlpull.v1.XmlPullParserException
+    {
+        super.inflate(resources, parser, attributes, theme);
         readVector(resources, parser, attributes);
     }
 
     void readVector(Resources resources, XmlPullParser parser, AttributeSet attributes) throws java.io.IOException,
         org.xmlpull.v1.XmlPullParserException
     {
+        mRoot = new Group();
         mViewportWidth = DrawableInflater.dimensionOrFloat(resources, attributes, "viewportWidth", 0);
         mViewportHeight = DrawableInflater.dimensionOrFloat(resources, attributes, "viewportHeight", 0);
         mIntrinsicWidth = Math.round(DrawableInflater.dimension(resources, attributes, "width", 0));
         mIntrinsicHeight = Math.round(DrawableInflater.dimension(resources, attributes, "height", 0));
+        mAutoMirrored = DrawableInflater.flag(attributes, "autoMirrored", mAutoMirrored);
 
-        int tint = DrawableInflater.color(resources, attributes, "tint", 0);
-        if (tint != 0) setTint(tint);
+        float alpha = DrawableInflater.dimensionOrFloat(resources, attributes, "alpha", mRootAlpha / 255.0f);
+        mRootAlpha = Math.max(0, Math.min(255, Math.round(alpha * 255)));
+
+        ColorStateList tint = DrawableInflater.colorStateList(resources, attributes, "tint");
+        if (tint != null) mTint = tint;
+        mTintBlendMode = DrawableInflater.tintMode(attributes, "tintMode", mTintBlendMode);
+        updateTintColor(getState());
+
+        int insetLeft = Math.round(DrawableInflater.dimension(resources, attributes, "opticalInsetLeft", 0));
+        int insetTop = Math.round(DrawableInflater.dimension(resources, attributes, "opticalInsetTop", 0));
+        int insetRight = Math.round(DrawableInflater.dimension(resources, attributes, "opticalInsetRight", 0));
+        int insetBottom = Math.round(DrawableInflater.dimension(resources, attributes, "opticalInsetBottom", 0));
+        mOpticalInsets = Insets.of(insetLeft, insetTop, insetRight, insetBottom);
 
         readChildren(resources, parser, attributes, mRoot, parser.getDepth());
 
@@ -185,13 +327,25 @@ public class VectorDrawable extends Drawable
 
         int saveCount = canvas.save();
         canvas.translate(bounds.left, bounds.top);
+
+        if (mAutoMirrored && getLayoutDirection() == 1)
+        {
+            canvas.translate(bounds.width(), 0);
+            canvas.scale(-1.0f, 1.0f);
+        }
+
         canvas.scale(bounds.width() / mViewportWidth, bounds.height() / mViewportHeight);
 
-        drawGroup(canvas, mRoot);
+        ColorFilter filter = mColorFilter;
+        boolean replaceColor = filter == null && mTint != null && mTintBlendMode == BlendMode.SRC_IN;
+        if (filter == null && mTint != null && !replaceColor) filter = tintFilterFor(mTint, mTintBlendMode, getState());
+
+        mPaint.setColorFilter(filter);
+        drawGroup(canvas, mRoot, replaceColor);
         canvas.restoreToCount(saveCount);
     }
 
-    private void drawGroup(Canvas canvas, Group group)
+    private void drawGroup(Canvas canvas, Group group, boolean replaceColor)
     {
         int saveCount = canvas.save();
 
@@ -202,21 +356,21 @@ public class VectorDrawable extends Drawable
         {
             Object child = group.children.get(index);
 
-            if (child instanceof Group) drawGroup(canvas, (Group) child);
-            else drawShape(canvas, (Shape) child);
+            if (child instanceof Group) drawGroup(canvas, (Group) child, replaceColor);
+            else drawShape(canvas, (Shape) child, replaceColor);
         }
 
         canvas.restoreToCount(saveCount);
     }
 
-    private void drawShape(Canvas canvas, Shape shape)
+    private void drawShape(Canvas canvas, Shape shape, boolean replaceColor)
     {
-        int alpha = getAlpha();
+        float alpha = mRootAlpha / 255.0f;
 
         if (shape.fillColor != 0)
         {
             mPaint.setStyle(Paint.Style.FILL);
-            mPaint.setColor(scaleAlpha(tinted(shape.fillColor), shape.fillAlpha * alpha / 255.0f));
+            mPaint.setColor(scaleAlpha(tinted(shape.fillColor, replaceColor), shape.fillAlpha * alpha));
             shape.path.setFillType(shape.evenOdd ? Path.FillType.EVEN_ODD : Path.FillType.WINDING);
 
             canvas.drawPath(shape.path, mPaint);
@@ -226,23 +380,81 @@ public class VectorDrawable extends Drawable
         {
             mPaint.setStyle(Paint.Style.STROKE);
             mPaint.setStrokeWidth(shape.strokeWidth);
-            mPaint.setColor(scaleAlpha(tinted(shape.strokeColor), shape.strokeAlpha * alpha / 255.0f));
+            mPaint.setColor(scaleAlpha(tinted(shape.strokeColor, replaceColor), shape.strokeAlpha * alpha));
 
             canvas.drawPath(shape.path, mPaint);
         }
     }
 
-    private int tinted(int color)
+    private int tinted(int color, boolean replaceColor)
     {
-        if (!mTinted) return color;
+        if (!replaceColor) return color;
 
-        return (color & 0xFF000000) | (mTint & 0x00FFFFFF);
+        int alpha = ((color >>> 24) * (mTintColor >>> 24) + 127) / 255;
+        return (alpha << 24) | (mTintColor & 0x00FFFFFF);
     }
 
     private static int scaleAlpha(int color, float amount)
     {
         int alpha = Math.round(((color >>> 24) & 0xFF) * Math.max(0, Math.min(1, amount)));
         return (alpha << 24) | (color & 0x00FFFFFF);
+    }
+
+    private static final class VectorState extends ConstantState
+    {
+        private final Group mRoot;
+        private final int mResourceId;
+        private final float mViewportWidth;
+        private final float mViewportHeight;
+        private final int mIntrinsicWidth;
+        private final int mIntrinsicHeight;
+        private final int mRootAlpha;
+        private final boolean mAutoMirrored;
+        private final Insets mOpticalInsets;
+        private final ColorStateList mTint;
+        private final BlendMode mTintBlendMode;
+        private final int mChangingConfigurations;
+
+        VectorState(VectorDrawable source)
+        {
+            mRoot = source.mRoot;
+            mResourceId = source.mResourceId;
+            mViewportWidth = source.mViewportWidth;
+            mViewportHeight = source.mViewportHeight;
+            mIntrinsicWidth = source.mIntrinsicWidth;
+            mIntrinsicHeight = source.mIntrinsicHeight;
+            mRootAlpha = source.mRootAlpha;
+            mAutoMirrored = source.mAutoMirrored;
+            mOpticalInsets = source.mOpticalInsets;
+            mTint = source.mTint;
+            mTintBlendMode = source.mTintBlendMode;
+            mChangingConfigurations = source.getChangingConfigurations();
+        }
+
+        @Override
+        public Drawable newDrawable()
+        {
+            VectorDrawable drawable = new VectorDrawable(mResourceId);
+            drawable.mRoot = mRoot;
+            drawable.mViewportWidth = mViewportWidth;
+            drawable.mViewportHeight = mViewportHeight;
+            drawable.mIntrinsicWidth = mIntrinsicWidth;
+            drawable.mIntrinsicHeight = mIntrinsicHeight;
+            drawable.mRootAlpha = mRootAlpha;
+            drawable.mAutoMirrored = mAutoMirrored;
+            drawable.mOpticalInsets = mOpticalInsets;
+            drawable.mTint = mTint;
+            drawable.mTintBlendMode = mTintBlendMode;
+            drawable.updateTintColor(drawable.getState());
+            drawable.setChangingConfigurations(mChangingConfigurations);
+            return drawable;
+        }
+
+        @Override
+        public int getChangingConfigurations()
+        {
+            return mChangingConfigurations;
+        }
     }
 
     private static final class Group

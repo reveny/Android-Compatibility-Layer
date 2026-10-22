@@ -1,7 +1,24 @@
 package android.util;
 
-public final class SizeF
+public final class SizeF implements android.os.Parcelable
 {
+    public static final android.os.Parcelable.Creator<SizeF> CREATOR = new android.os.Parcelable.Creator<SizeF>()
+    {
+        @Override
+        public SizeF createFromParcel(android.os.Parcel source)
+        {
+            float width = source.readFloat();
+            float height = source.readFloat();
+            return new SizeF(width, height);
+        }
+
+        @Override
+        public SizeF[] newArray(int size)
+        {
+            return new SizeF[size];
+        }
+    };
+
     private final float mWidth;
     private final float mHeight;
 
@@ -52,5 +69,18 @@ public final class SizeF
     public String toString()
     {
         return mWidth + "x" + mHeight;
+    }
+
+    @Override
+    public int describeContents()
+    {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(android.os.Parcel destination, int flags)
+    {
+        destination.writeFloat(mWidth);
+        destination.writeFloat(mHeight);
     }
 }

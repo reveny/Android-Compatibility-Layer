@@ -4,6 +4,11 @@ public interface AttributeSet
 {
     int getAttributeCount();
 
+    default String getAttributeNamespace(int index)
+    {
+        return null;
+    }
+
     String getAttributeName(int index);
 
     String getAttributeValue(int index);

@@ -7,6 +7,7 @@
 #include "ElfLoader/ElfLoader.hpp"
 #include "GuestLibc/GuestLibc.hpp"
 #include "GuestRuntime/GuestRuntime.hpp"
+#include "Settings/Settings.hpp"
 
 static bool gRecompile = false;
 
@@ -160,9 +161,24 @@ static int RunGuest(const std::string& path)
     return 0;
 }
 
+static void ApplySettings(int argc, char** argv)
+{
+    for (int index = 1; index + 1 < argc; ++index)
+    {
+        if (strcmp(argv[index], "--setting") != 0) continue;
+
+        std::string assignment = argv[index + 1];
+        size_t equals = assignment.find('=');
+        if (equals == std::string::npos) continue;
+
+        Settings::Set(assignment.substr(0, equals), assignment.substr(equals + 1));
+    }
+}
+
 int main(int argc, char** argv)
 {
     gRecompile = TierRecompileRequested(argc, argv);
+    ApplySettings(argc, argv);
 
     if (argc >= 2 && strcmp(argv[1], "--host") == 0) return RunHost();
     if (argc >= 3 && strcmp(argv[1], "--guest") == 0) return RunGuest(argv[2]);

@@ -3,7 +3,7 @@ package android.content.res;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
 
-public class TypedArray
+public class TypedArray implements AutoCloseable
 {
     static final int STYLE_NUM_ENTRIES = 7;
     static final int STYLE_TYPE = 0;
@@ -21,10 +21,18 @@ public class TypedArray
     private XmlBlock.Parser mParser;
     private int mLength;
     private boolean mRecycled;
+    private Resources.Theme mTheme;
+    private String[] mStrings;
 
     TypedArray(Resources resources)
     {
         mResources = resources;
+    }
+
+    TypedArray(Resources resources, Resources.Theme theme)
+    {
+        mResources = resources;
+        mTheme = theme;
     }
 
     void bind(int[] attributes, int[] data, int[] indices, XmlBlock.Parser parser)
@@ -35,6 +43,12 @@ public class TypedArray
         mParser = parser;
         mLength = attributes.length;
         mRecycled = false;
+        mStrings = null;
+    }
+
+    void bindStrings(String[] strings)
+    {
+        mStrings = strings;
     }
 
     public Resources getResources()
@@ -114,6 +128,14 @@ public class TypedArray
         int type = typeAt(index);
         if (type == TypedValue.TYPE_NULL) return defaultValue;
         if (type >= TypedValue.TYPE_FIRST_INT && type <= TypedValue.TYPE_LAST_INT) return dataAt(index);
+
+        int resourceId = mData[index * STYLE_NUM_ENTRIES + STYLE_RESOURCE_ID];
+        if (type == TypedValue.TYPE_STRING && resourceId != 0)
+        {
+            ColorStateList colors = mResources.getColorStateList(resourceId, mTheme);
+            return colors != null ? colors.getDefaultColor() : defaultValue;
+        }
+
         return defaultValue;
     }
 
@@ -127,7 +149,7 @@ public class TypedArray
         }
 
         int resourceId = mData[index * STYLE_NUM_ENTRIES + STYLE_RESOURCE_ID];
-        if (resourceId != 0) return mResources.getColorStateList(resourceId);
+        if (resourceId != 0) return mResources.getColorStateList(resourceId, mTheme);
 
         runtime.Strict.unimplemented("TypedArray.getColorStateList type 0x" + Integer.toHexString(type));
         return null;
@@ -177,6 +199,7 @@ public class TypedArray
     public String getString(int index)
     {
         if (!inRange(index)) return null;
+        if (mStrings != null && index < mStrings.length && mStrings[index] != null) return mStrings[index];
 
         int type = typeAt(index);
         if (type == TypedValue.TYPE_NULL) return null;
@@ -225,7 +248,25 @@ public class TypedArray
 
     public android.graphics.Typeface getFont(int index)
     {
-        return android.graphics.Typeface.DEFAULT;
+        int resourceId = inRange(index) ? mData[index * STYLE_NUM_ENTRIES + STYLE_RESOURCE_ID] : 0;
+        if (resourceId == 0) return android.graphics.Typeface.DEFAULT;
+
+        try
+        {
+            return mResources.getFont(resourceId);
+        }
+        catch (Resources.NotFoundException failure)
+        {
+            return android.graphics.Typeface.DEFAULT;
+        }
+    }
+
+    public int getSourceResourceId(int index, int defaultValue)
+    {
+        if (!inRange(index)) return defaultValue;
+
+        int resourceId = mData[index * STYLE_NUM_ENTRIES + STYLE_SOURCE_RESOURCE_ID];
+        return resourceId != 0 ? resourceId : defaultValue;
     }
 
     public boolean getValue(int index, TypedValue outValue)
@@ -264,6 +305,18 @@ public class TypedArray
     public void recycle()
     {
         mRecycled = true;
+    }
+
+    @Override
+    public void close()
+    {
+        recycle();
+    }
+
+    @Override
+    public String toString()
+    {
+        return mData == null ? "TypedArray{}" : java.util.Arrays.toString(mData);
     }
 
     boolean isRecycled()

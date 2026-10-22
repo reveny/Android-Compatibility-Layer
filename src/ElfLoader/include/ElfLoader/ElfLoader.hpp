@@ -83,6 +83,7 @@ namespace ElfLoader
         uint64_t resolvedToHostStub = 0;
         uint64_t resolvedToHostData = 0;
         uint64_t resolvedWeakToZero = 0;
+        uint64_t packed = 0;
     };
 
     struct Library

@@ -1,36 +1,44 @@
 package android.view.inputmethod;
 
-public class InputContentInfo
-{
-    private final Object mContentUri;
-    private final Object mDescription;
-    private final Object mLinkUri;
+import android.content.ClipDescription;
+import android.net.Uri;
+import android.os.Parcel;
+import android.os.Parcelable;
 
-    public InputContentInfo(Object contentUri, Object description)
+public final class InputContentInfo implements Parcelable
+{
+    private final Uri mContentUri;
+    private final ClipDescription mDescription;
+    private final Uri mLinkUri;
+
+    public InputContentInfo(Uri contentUri, ClipDescription description)
     {
         this(contentUri, description, null);
     }
 
-    public InputContentInfo(Object contentUri, Object description, Object linkUri)
+    public InputContentInfo(Uri contentUri, ClipDescription description, Uri linkUri)
     {
+        if (contentUri == null) throw new NullPointerException("contentUri");
+        if (description == null) throw new NullPointerException("description");
+
         mContentUri = contentUri;
         mDescription = description;
         mLinkUri = linkUri;
     }
 
-    public android.net.Uri getContentUri()
+    public Uri getContentUri()
     {
-        return (android.net.Uri)mContentUri;
+        return mContentUri;
     }
 
-    public android.content.ClipDescription getDescription()
+    public ClipDescription getDescription()
     {
-        return (android.content.ClipDescription)mDescription;
+        return mDescription;
     }
 
-    public android.net.Uri getLinkUri()
+    public Uri getLinkUri()
     {
-        return (android.net.Uri)mLinkUri;
+        return mLinkUri;
     }
 
     public void requestPermission()
@@ -40,4 +48,36 @@ public class InputContentInfo
     public void releasePermission()
     {
     }
+
+    @Override
+    public int describeContents()
+    {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(Parcel dest, int flags)
+    {
+        dest.writeValue(mContentUri);
+        dest.writeValue(mDescription);
+        dest.writeValue(mLinkUri);
+    }
+
+    public static final Creator<InputContentInfo> CREATOR = new Creator<InputContentInfo>()
+    {
+        @Override
+        public InputContentInfo createFromParcel(Parcel source)
+        {
+            Uri contentUri = (Uri)source.readValue(null);
+            ClipDescription description = (ClipDescription)source.readValue(null);
+            Uri linkUri = (Uri)source.readValue(null);
+            return new InputContentInfo(contentUri, description, linkUri);
+        }
+
+        @Override
+        public InputContentInfo[] newArray(int size)
+        {
+            return new InputContentInfo[size];
+        }
+    };
 }

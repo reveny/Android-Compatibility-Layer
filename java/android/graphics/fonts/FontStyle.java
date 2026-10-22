@@ -13,6 +13,7 @@ public final class FontStyle
     public static final int FONT_WEIGHT_BLACK = 900;
     public static final int FONT_WEIGHT_MIN = 1;
     public static final int FONT_WEIGHT_MAX = 1000;
+    public static final int FONT_WEIGHT_UNSPECIFIED = -1;
 
     public static final int FONT_SLANT_UPRIGHT = 0;
     public static final int FONT_SLANT_ITALIC = 1;
@@ -39,6 +40,22 @@ public final class FontStyle
     public int getSlant()
     {
         return mSlant;
+    }
+
+    @Override
+    public boolean equals(Object other)
+    {
+        if (other == this) return true;
+        if (!(other instanceof FontStyle)) return false;
+
+        FontStyle that = (FontStyle)other;
+        return mWeight == that.mWeight && mSlant == that.mSlant;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return 31 * mWeight + mSlant;
     }
 
     @Override

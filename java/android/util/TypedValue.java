@@ -34,6 +34,12 @@ public class TypedValue
     public static final int COMPLEX_UNIT_MASK = 0xf;
     public static final int COMPLEX_RADIX_SHIFT = 4;
     public static final int COMPLEX_RADIX_MASK = 0x3;
+    public static final int COMPLEX_RADIX_23p0 = 0;
+    public static final int COMPLEX_RADIX_16p7 = 1;
+    public static final int COMPLEX_RADIX_8p15 = 2;
+    public static final int COMPLEX_RADIX_0p23 = 3;
+    public static final int DATA_NULL_UNDEFINED = 0;
+    public static final int DATA_NULL_EMPTY = 1;
     public static final int COMPLEX_MANTISSA_SHIFT = 8;
     public static final int COMPLEX_MANTISSA_MASK = 0xffffff;
 
@@ -107,6 +113,26 @@ public class TypedValue
     {
         float base = applyDimension(unitToConvertTo, 1.0f, metrics);
         return base == 0 ? 0 : pixelValue / base;
+    }
+
+    public static float convertPixelsToDimension(int unitToConvertTo, float pixelValue, DisplayMetrics metrics)
+    {
+        return deriveDimension(unitToConvertTo, pixelValue, metrics);
+    }
+
+    public static float convertDimensionToPixels(int unitToConvertFrom, float value, DisplayMetrics metrics)
+    {
+        return applyDimension(unitToConvertFrom, value, metrics);
+    }
+
+    public boolean isColorType()
+    {
+        return type >= TYPE_FIRST_COLOR_INT && type <= TYPE_LAST_COLOR_INT;
+    }
+
+    public float getDimension(DisplayMetrics metrics)
+    {
+        return complexToDimension(data, metrics);
     }
 
     public final float getFraction(float base, float pbase)

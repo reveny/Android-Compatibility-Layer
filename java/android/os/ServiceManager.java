@@ -7,6 +7,11 @@ public final class ServiceManager
 {
     private static final Map<String, IBinder> sServices = new LinkedHashMap<>();
 
+    static
+    {
+        sServices.put("deviceidle", new PowerExemptionManager.DeviceIdleController());
+    }
+
     private ServiceManager()
     {
     }

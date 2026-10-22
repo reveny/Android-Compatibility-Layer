@@ -25,6 +25,7 @@ public final class Icon implements Parcelable
     private int mDataOffset;
     private int mDataLength;
     private android.content.res.ColorStateList mTintList;
+    private android.graphics.BlendMode mTintBlendMode;
 
     private Icon(int type)
     {
@@ -86,11 +87,33 @@ public final class Icon implements Parcelable
         return mTintList;
     }
 
+    public Icon setTintMode(android.graphics.PorterDuff.Mode mode)
+    {
+        mTintBlendMode = blendModeOf(mode);
+        return this;
+    }
+
+    private static android.graphics.BlendMode blendModeOf(android.graphics.PorterDuff.Mode mode)
+    {
+        if (mode == null) return null;
+        if (mode == android.graphics.PorterDuff.Mode.ADD) return android.graphics.BlendMode.PLUS;
+        if (mode == android.graphics.PorterDuff.Mode.MULTIPLY) return android.graphics.BlendMode.MODULATE;
+
+        return android.graphics.BlendMode.valueOf(mode.name());
+    }
+
+    public Icon setTintBlendMode(android.graphics.BlendMode blendMode)
+    {
+        mTintBlendMode = blendMode;
+        return this;
+    }
+
     public Drawable loadDrawable(Context context)
     {
         Drawable drawable = buildDrawable(context);
 
         if (drawable != null && mTintList != null) drawable.setTintList(mTintList);
+        if (drawable != null && mTintBlendMode != null) drawable.setTintBlendMode(mTintBlendMode);
 
         return drawable;
     }
@@ -139,7 +162,41 @@ public final class Icon implements Parcelable
             return new BitmapDrawable(context == null ? null : context.getResources(), decoded);
         }
 
+        if (mType == TYPE_URI || mType == TYPE_URI_ADAPTIVE_BITMAP)
+        {
+            Bitmap decoded = decodeUri(context);
+            if (decoded == null) return null;
+
+            BitmapDrawable bitmap = new BitmapDrawable(context == null ? null : context.getResources(), decoded);
+            return mType == TYPE_URI ? bitmap : new AdaptiveIconDrawable(null, bitmap);
+        }
+
         return null;
+    }
+
+    private Bitmap decodeUri(Context context)
+    {
+        if (mUri == null) return null;
+
+        Uri uri = Uri.parse(mUri);
+        String scheme = uri.getScheme();
+
+        if (scheme == null || "file".equals(scheme))
+        {
+            String path = scheme == null ? mUri : uri.getPath();
+            return android.graphics.BitmapFactory.decodeFile(path);
+        }
+
+        if (context == null) return null;
+
+        try (java.io.InputStream stream = context.getContentResolver().openInputStream(uri))
+        {
+            return stream == null ? null : android.graphics.BitmapFactory.decodeStream(stream);
+        }
+        catch (Exception failure)
+        {
+            return null;
+        }
     }
 
     public void loadDrawableAsync(Context context, android.os.Message andThen)
@@ -215,6 +272,16 @@ public final class Icon implements Parcelable
         Icon icon = new Icon(TYPE_RESOURCE);
         icon.mPackageName = packageName;
         icon.mResourceId = resourceId;
+
+        return icon;
+    }
+
+    public static Icon createWithFilePath(String path)
+    {
+        if (path == null) throw new IllegalArgumentException("Path must not be null.");
+
+        Icon icon = new Icon(TYPE_URI);
+        icon.mUri = path;
 
         return icon;
     }

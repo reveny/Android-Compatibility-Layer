@@ -2,10 +2,8 @@ package android.os;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Set;
 
-public class Bundle implements Parcelable, Cloneable
+public final class Bundle extends BaseBundle implements Cloneable, Parcelable
 {
     public static final Bundle EMPTY = new Bundle(true);
 
@@ -14,8 +12,9 @@ public class Bundle implements Parcelable, Cloneable
         @Override
         public Bundle createFromParcel(Parcel source)
         {
-            Object value = source == null ? null : source.readValue(null);
-            return value instanceof Bundle ? (Bundle)value : new Bundle();
+            Bundle bundle = new Bundle();
+            if (source != null) source.readBundleBody(bundle.mMap, null);
+            return bundle;
         }
 
         @Override
@@ -25,33 +24,39 @@ public class Bundle implements Parcelable, Cloneable
         }
     };
 
-    private final java.util.Map<String, Object> mMap;
     private ClassLoader mClassLoader;
 
     public Bundle()
     {
-        mMap = new HashMap<>();
+        super();
     }
 
     private Bundle(boolean immutable)
     {
-        mMap = immutable ? java.util.Collections.<String, Object>unmodifiableMap(new HashMap<String, Object>()) : new HashMap<String, Object>();
+        super(immutable ? java.util.Collections.<String, Object>unmodifiableMap(new HashMap<String, Object>())
+                        : new HashMap<String, Object>());
     }
 
     public Bundle(Bundle source)
     {
-        mMap = new HashMap<>();
+        super();
+        if (source != null) mMap.putAll(source.mMap);
+    }
+
+    public Bundle(PersistableBundle source)
+    {
+        super();
         if (source != null) mMap.putAll(source.mMap);
     }
 
     public Bundle(int capacity)
     {
-        mMap = new HashMap<>(Math.max(1, capacity));
+        super(capacity);
     }
 
     public Bundle(ClassLoader loader)
     {
-        mMap = new HashMap<>();
+        super();
         mClassLoader = loader;
     }
 
@@ -65,61 +70,14 @@ public class Bundle implements Parcelable, Cloneable
         return mClassLoader;
     }
 
-    public Set<String> keySet()
+    public boolean hasFileDescriptors()
     {
-        return new HashSet<>(mMap.keySet());
-    }
-
-    public boolean isEmpty()
-    {
-        return mMap.isEmpty();
-    }
-
-    public int size()
-    {
-        return mMap.size();
-    }
-
-    public boolean containsKey(String key)
-    {
-        return mMap.containsKey(key);
-    }
-
-    public void remove(String key)
-    {
-        mMap.remove(key);
-    }
-
-    public void clear()
-    {
-        mMap.clear();
+        return false;
     }
 
     public void putAll(Bundle other)
     {
         if (other != null) mMap.putAll(other.mMap);
-    }
-
-    public Object get(String key)
-    {
-        return mMap.get(key);
-    }
-
-    public void putString(String key, String value)
-    {
-        mMap.put(key, value);
-    }
-
-    public String getString(String key)
-    {
-        Object value = mMap.get(key);
-        return value instanceof String ? (String)value : null;
-    }
-
-    public String getString(String key, String defaultValue)
-    {
-        String value = getString(key);
-        return value == null ? defaultValue : value;
     }
 
     public void putCharSequence(String key, CharSequence value)
@@ -133,36 +91,10 @@ public class Bundle implements Parcelable, Cloneable
         return value instanceof CharSequence ? (CharSequence)value : null;
     }
 
-    public void putInt(String key, int value)
+    public CharSequence getCharSequence(String key, CharSequence defaultValue)
     {
-        mMap.put(key, value);
-    }
-
-    public int getInt(String key)
-    {
-        return getInt(key, 0);
-    }
-
-    public int getInt(String key, int defaultValue)
-    {
-        Object value = mMap.get(key);
-        return value instanceof Integer ? (Integer)value : defaultValue;
-    }
-
-    public void putLong(String key, long value)
-    {
-        mMap.put(key, value);
-    }
-
-    public long getLong(String key)
-    {
-        return getLong(key, 0L);
-    }
-
-    public long getLong(String key, long defaultValue)
-    {
-        Object value = mMap.get(key);
-        return value instanceof Long ? (Long)value : defaultValue;
+        CharSequence value = getCharSequence(key);
+        return value == null ? defaultValue : value;
     }
 
     public void putFloat(String key, float value)
@@ -181,22 +113,6 @@ public class Bundle implements Parcelable, Cloneable
         return value instanceof Float ? (Float)value : defaultValue;
     }
 
-    public void putDouble(String key, double value)
-    {
-        mMap.put(key, value);
-    }
-
-    public double getDouble(String key, double defaultValue)
-    {
-        Object value = mMap.get(key);
-        return value instanceof Double ? (Double)value : defaultValue;
-    }
-
-    public double getDouble(String key)
-    {
-        return getDouble(key, 0.0);
-    }
-
     public void putByte(String key, byte value)
     {
         mMap.put(key, Byte.valueOf(value));
@@ -207,10 +123,10 @@ public class Bundle implements Parcelable, Cloneable
         return getByte(key, (byte)0);
     }
 
-    public byte getByte(String key, byte defaultValue)
+    public Byte getByte(String key, byte defaultValue)
     {
         Object value = mMap.get(key);
-        return value instanceof Byte ? ((Byte)value).byteValue() : defaultValue;
+        return value instanceof Byte ? (Byte)value : Byte.valueOf(defaultValue);
     }
 
     public void putShort(String key, short value)
@@ -256,26 +172,26 @@ public class Bundle implements Parcelable, Cloneable
         return value instanceof byte[] ? (byte[])value : null;
     }
 
-    public void putBooleanArray(String key, boolean[] value)
+    public void putShortArray(String key, short[] value)
     {
         mMap.put(key, value);
     }
 
-    public boolean[] getBooleanArray(String key)
+    public short[] getShortArray(String key)
     {
         Object value = mMap.get(key);
-        return value instanceof boolean[] ? (boolean[])value : null;
+        return value instanceof short[] ? (short[])value : null;
     }
 
-    public void putLongArray(String key, long[] value)
+    public void putCharArray(String key, char[] value)
     {
         mMap.put(key, value);
     }
 
-    public long[] getLongArray(String key)
+    public char[] getCharArray(String key)
     {
         Object value = mMap.get(key);
-        return value instanceof long[] ? (long[])value : null;
+        return value instanceof char[] ? (char[])value : null;
     }
 
     public void putFloatArray(String key, float[] value)
@@ -289,55 +205,39 @@ public class Bundle implements Parcelable, Cloneable
         return value instanceof float[] ? (float[])value : null;
     }
 
-    public void putDoubleArray(String key, double[] value)
+    public void putCharSequenceArray(String key, CharSequence[] value)
     {
         mMap.put(key, value);
     }
 
-    public double[] getDoubleArray(String key)
+    public CharSequence[] getCharSequenceArray(String key)
     {
         Object value = mMap.get(key);
-        return value instanceof double[] ? (double[])value : null;
+        return value instanceof CharSequence[] ? (CharSequence[])value : null;
     }
 
-    public void putIntegerArrayList(String key, java.util.ArrayList<Integer> value)
-    {
-        mMap.put(key, value);
-    }
-
-    @SuppressWarnings("unchecked")
-    public java.util.ArrayList<Integer> getIntegerArrayList(String key)
-    {
-        Object value = mMap.get(key);
-        return value instanceof java.util.ArrayList ? (java.util.ArrayList<Integer>)value : null;
-    }
-
-    public void putCharSequenceArrayList(String key, java.util.ArrayList<CharSequence> value)
+    public void putIntegerArrayList(String key, ArrayList<Integer> value)
     {
         mMap.put(key, value);
     }
 
     @SuppressWarnings("unchecked")
-    public java.util.ArrayList<CharSequence> getCharSequenceArrayList(String key)
+    public ArrayList<Integer> getIntegerArrayList(String key)
     {
         Object value = mMap.get(key);
-        return value instanceof java.util.ArrayList ? (java.util.ArrayList<CharSequence>)value : null;
+        return value instanceof ArrayList ? (ArrayList<Integer>)value : null;
     }
 
-    public void putBoolean(String key, boolean value)
+    public void putCharSequenceArrayList(String key, ArrayList<CharSequence> value)
     {
         mMap.put(key, value);
     }
 
-    public boolean getBoolean(String key)
-    {
-        return getBoolean(key, false);
-    }
-
-    public boolean getBoolean(String key, boolean defaultValue)
+    @SuppressWarnings("unchecked")
+    public ArrayList<CharSequence> getCharSequenceArrayList(String key)
     {
         Object value = mMap.get(key);
-        return value instanceof Boolean ? (Boolean)value : defaultValue;
+        return value instanceof ArrayList ? (ArrayList<CharSequence>)value : null;
     }
 
     public void putBundle(String key, Bundle value)
@@ -349,28 +249,6 @@ public class Bundle implements Parcelable, Cloneable
     {
         Object value = mMap.get(key);
         return value instanceof Bundle ? (Bundle)value : null;
-    }
-
-    public void putIntArray(String key, int[] value)
-    {
-        mMap.put(key, value);
-    }
-
-    public int[] getIntArray(String key)
-    {
-        Object value = mMap.get(key);
-        return value instanceof int[] ? (int[])value : null;
-    }
-
-    public void putStringArray(String key, String[] value)
-    {
-        mMap.put(key, value);
-    }
-
-    public String[] getStringArray(String key)
-    {
-        Object value = mMap.get(key);
-        return value instanceof String[] ? (String[])value : null;
     }
 
     public void putStringArrayList(String key, ArrayList<String> value)
@@ -396,15 +274,33 @@ public class Bundle implements Parcelable, Cloneable
         return value instanceof java.io.Serializable ? (java.io.Serializable)value : null;
     }
 
+    public <T extends java.io.Serializable> T getSerializable(String key, Class<T> type)
+    {
+        Object value = mMap.get(key);
+        return type.isInstance(value) ? type.cast(value) : null;
+    }
+
+    public void putBinder(String key, IBinder value)
+    {
+        mMap.put(key, value);
+    }
+
+    public IBinder getBinder(String key)
+    {
+        Object value = mMap.get(key);
+        return value instanceof IBinder ? (IBinder)value : null;
+    }
+
     public void putParcelable(String key, Parcelable value)
     {
         mMap.put(key, value);
     }
 
-    public Parcelable getParcelable(String key)
+    @SuppressWarnings("unchecked")
+    public <T extends Parcelable> T getParcelable(String key)
     {
         Object value = mMap.get(key);
-        return value instanceof Parcelable ? (Parcelable)value : null;
+        return value instanceof Parcelable ? (T)value : null;
     }
 
     public <T> T getParcelable(String key, Class<T> type)
@@ -413,30 +309,37 @@ public class Bundle implements Parcelable, Cloneable
         return type.isInstance(value) ? type.cast(value) : null;
     }
 
-    public <T> ArrayList<T> getParcelableArrayList(String key, Class<T> type)
+    public void putParcelableArray(String key, Parcelable[] value)
     {
-        return getParcelableArrayList(key);
+        mMap.put(key, value);
     }
 
-    public <T extends java.io.Serializable> T getSerializable(String key, Class<T> type)
+    public Parcelable[] getParcelableArray(String key)
     {
         Object value = mMap.get(key);
-        return type.isInstance(value) ? type.cast(value) : null;
+        return value instanceof Parcelable[] ? (Parcelable[])value : null;
     }
 
-    public void putParcelableArrayList(String key, ArrayList<?> value)
+    public void putParcelableArrayList(String key, ArrayList<? extends Parcelable> value)
     {
         mMap.put(key, value);
     }
 
     @SuppressWarnings("unchecked")
-    public <T> ArrayList<T> getParcelableArrayList(String key)
+    public <T extends Parcelable> ArrayList<T> getParcelableArrayList(String key)
     {
         Object value = mMap.get(key);
         return value instanceof ArrayList ? (ArrayList<T>)value : null;
     }
 
-    public <T extends Parcelable> void putSparseParcelableArray(String key, android.util.SparseArray<T> value)
+    @SuppressWarnings("unchecked")
+    public <T> ArrayList<T> getParcelableArrayList(String key, Class<? extends T> type)
+    {
+        Object value = mMap.get(key);
+        return value instanceof ArrayList ? (ArrayList<T>)value : null;
+    }
+
+    public void putSparseParcelableArray(String key, android.util.SparseArray<? extends Parcelable> value)
     {
         mMap.put(key, value);
     }
@@ -448,6 +351,64 @@ public class Bundle implements Parcelable, Cloneable
         return value instanceof android.util.SparseArray ? (android.util.SparseArray<T>)value : null;
     }
 
+    @SuppressWarnings("unchecked")
+    public <T> T[] getParcelableArray(String key, Class<T> type)
+    {
+        Object value = mMap.get(key);
+        if (!(value instanceof Object[]) || type == null) return null;
+
+        Object[] source = (Object[])value;
+        T[] result = (T[])java.lang.reflect.Array.newInstance(type, source.length);
+        for (int index = 0; index < source.length; index++)
+        {
+            if (source[index] != null && !type.isInstance(source[index])) return null;
+            result[index] = (T)source[index];
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> android.util.SparseArray<T> getSparseParcelableArray(String key, Class<? extends T> type)
+    {
+        Object value = mMap.get(key);
+        return value instanceof android.util.SparseArray ? (android.util.SparseArray<T>)value : null;
+    }
+
+    public void putSize(String key, android.util.Size value)
+    {
+        mMap.put(key, value);
+    }
+
+    public void putSizeF(String key, android.util.SizeF value)
+    {
+        mMap.put(key, value);
+    }
+
+    public android.util.Size getSize(String key)
+    {
+        Object value = mMap.get(key);
+        return value instanceof android.util.Size ? (android.util.Size)value : null;
+    }
+
+    public android.util.SizeF getSizeF(String key)
+    {
+        Object value = mMap.get(key);
+        return value instanceof android.util.SizeF ? (android.util.SizeF)value : null;
+    }
+
+    public void readFromParcel(Parcel parcel)
+    {
+        if (parcel == null) return;
+
+        mMap.clear();
+        parcel.readBundleBody(mMap, mClassLoader);
+    }
+
+    public Bundle deepCopy()
+    {
+        return new Bundle(this);
+    }
+
     @Override
     public int describeContents()
     {
@@ -457,7 +418,7 @@ public class Bundle implements Parcelable, Cloneable
     @Override
     public void writeToParcel(Parcel dest, int flags)
     {
-        dest.writeValue(this);
+        dest.writeBundleBody(this);
     }
 
     @Override
@@ -467,7 +428,7 @@ public class Bundle implements Parcelable, Cloneable
     }
 
     @Override
-    public String toString()
+    public synchronized String toString()
     {
         return "Bundle[" + mMap.keySet() + "]";
     }

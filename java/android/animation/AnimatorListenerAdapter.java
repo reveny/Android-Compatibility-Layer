@@ -1,6 +1,6 @@
 package android.animation;
 
-public abstract class AnimatorListenerAdapter implements Animator.AnimatorListener
+public abstract class AnimatorListenerAdapter implements Animator.AnimatorListener, Animator.AnimatorPauseListener
 {
     @Override
     public void onAnimationStart(Animator animation)
@@ -19,6 +19,16 @@ public abstract class AnimatorListenerAdapter implements Animator.AnimatorListen
 
     @Override
     public void onAnimationRepeat(Animator animation)
+    {
+    }
+
+    @Override
+    public void onAnimationPause(Animator animation)
+    {
+    }
+
+    @Override
+    public void onAnimationResume(Animator animation)
     {
     }
 }

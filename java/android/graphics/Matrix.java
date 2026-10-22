@@ -478,6 +478,85 @@ public class Matrix
         return (float) Math.sqrt(first * second);
     }
 
+    public boolean setPolyToPoly(float[] source, int sourceIndex, float[] destination, int destinationIndex, int pointCount)
+    {
+        if (pointCount < 0 || pointCount > 4) throw new IllegalArgumentException();
+        if (sourceIndex < 0 || sourceIndex + pointCount * 2 > source.length) throw new ArrayIndexOutOfBoundsException();
+        if (destinationIndex < 0 || destinationIndex + pointCount * 2 > destination.length) throw new ArrayIndexOutOfBoundsException();
+
+        if (pointCount == 0)
+        {
+            reset();
+            return true;
+        }
+
+        Matrix sourceBasis = polyBasis(source, sourceIndex, pointCount);
+        Matrix destinationBasis = polyBasis(destination, destinationIndex, pointCount);
+        if (sourceBasis == null || destinationBasis == null) return false;
+
+        Matrix inverse = new Matrix();
+        if (!sourceBasis.invert(inverse)) return false;
+
+        return setConcat(destinationBasis, inverse);
+    }
+
+    private static Matrix polyBasis(float[] points, int offset, int count)
+    {
+        float x0 = points[offset];
+        float y0 = points[offset + 1];
+        float[] values;
+
+        if (count == 1)
+        {
+            values = new float[] {1, 0, x0, 0, 1, y0, 0, 0, 1};
+        }
+        else if (count == 2)
+        {
+            float dx = points[offset + 2] - x0;
+            float dy = points[offset + 3] - y0;
+            values = new float[] {dx, -dy, x0, dy, dx, y0, 0, 0, 1};
+        }
+        else if (count == 3)
+        {
+            values = new float[] {points[offset + 2] - x0, points[offset + 4] - x0, x0, points[offset + 3] - y0,
+                                  points[offset + 5] - y0, y0, 0, 0, 1};
+        }
+        else
+        {
+            float x1 = points[offset + 2];
+            float y1 = points[offset + 3];
+            float x2 = points[offset + 4];
+            float y2 = points[offset + 5];
+            float x3 = points[offset + 6];
+            float y3 = points[offset + 7];
+            float sumX = x0 - x1 + x2 - x3;
+            float sumY = y0 - y1 + y2 - y3;
+
+            if (NearlyZero(sumX) && NearlyZero(sumY))
+            {
+                values = new float[] {x1 - x0, x3 - x0, x0, y1 - y0, y3 - y0, y0, 0, 0, 1};
+            }
+            else
+            {
+                float deltaX1 = x1 - x2;
+                float deltaX2 = x3 - x2;
+                float deltaY1 = y1 - y2;
+                float deltaY2 = y3 - y2;
+                float determinant = deltaX1 * deltaY2 - deltaX2 * deltaY1;
+                if (determinant == 0) return null;
+
+                float perspectiveX = (sumX * deltaY2 - deltaX2 * sumY) / determinant;
+                float perspectiveY = (deltaX1 * sumY - sumX * deltaY1) / determinant;
+                values = new float[] {x1 - x0 + perspectiveX * x1, x3 - x0 + perspectiveY * x3, x0, y1 - y0 + perspectiveX * y1,
+                                      y3 - y0 + perspectiveY * y3, y0, perspectiveX, perspectiveY, 1};
+            }
+        }
+
+        Matrix basis = new Matrix();
+        basis.setValues(values);
+        return basis;
+    }
+
     public boolean setRectToRect(RectF source, RectF destination, ScaleToFit fit)
     {
         if (source == null || destination == null) return false;

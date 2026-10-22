@@ -6,7 +6,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 
-public final class AssetManager
+public final class AssetManager implements AutoCloseable
 {
     public static final int ACCESS_UNKNOWN = 0;
     public static final int ACCESS_RANDOM = 1;
@@ -15,6 +15,11 @@ public final class AssetManager
 
     private final Resources mResources;
     private final long mHandle;
+
+    AssetManager()
+    {
+        this(null, 0);
+    }
 
     AssetManager(Resources resources, long handle)
     {
@@ -27,10 +32,27 @@ public final class AssetManager
         return mHandle;
     }
 
+    public XmlResourceParser openXmlResourceParser(String fileName) throws IOException
+    {
+        return openXmlResourceParser(0, fileName);
+    }
+
     public XmlResourceParser openXmlResourceParser(int cookie, String fileName) throws IOException
     {
-        runtime.Strict.unimplemented("android.content.res.AssetManager.openXmlResourceParser");
-        return null;
+        try (InputStream stream = openNonAsset(fileName))
+        {
+            return CompiledXmlParser.fromStream(stream);
+        }
+    }
+
+    public String[] getLocales()
+    {
+        android.os.LocaleList locales = android.os.LocaleList.getDefault();
+        String[] tags = new String[locales.size()];
+
+        for (int index = 0; index < tags.length; index++) tags[index] = locales.get(index).toLanguageTag();
+
+        return tags;
     }
 
     public String[] list(String path) throws IOException

@@ -55,8 +55,57 @@ public enum BlendMode
                 return 7;
             case PLUS:
                 return 8;
+            case DST_IN:
+                return 10;
+            case DST_ATOP:
+                return 11;
+            case SRC_OUT:
+                return 12;
+            case XOR:
+                return 13;
+            case DST:
+                return 14;
             default:
                 return 0;
+        }
+    }
+
+    public static BlendMode fromPorterDuffMode(PorterDuff.Mode mode)
+    {
+        if (mode == null) return null;
+        if (mode == PorterDuff.Mode.SRC_OVER) return SRC_OVER;
+
+        BlendMode converted = fromPorterDuff(mode);
+        return converted == SRC_OVER ? null : converted;
+    }
+
+    public static PorterDuff.Mode blendModeToPorterDuffMode(BlendMode mode)
+    {
+        if (mode == null) return null;
+
+        switch (mode)
+        {
+            case CLEAR: return PorterDuff.Mode.CLEAR;
+            case SRC: return PorterDuff.Mode.SRC;
+            case DST: return PorterDuff.Mode.DST;
+            case SRC_OVER: return PorterDuff.Mode.SRC_OVER;
+            case DST_OVER: return PorterDuff.Mode.DST_OVER;
+            case SRC_IN: return PorterDuff.Mode.SRC_IN;
+            case DST_IN: return PorterDuff.Mode.DST_IN;
+            case SRC_OUT: return PorterDuff.Mode.SRC_OUT;
+            case DST_OUT: return PorterDuff.Mode.DST_OUT;
+            case SRC_ATOP: return PorterDuff.Mode.SRC_ATOP;
+            case DST_ATOP: return PorterDuff.Mode.DST_ATOP;
+            case XOR: return PorterDuff.Mode.XOR;
+            case DARKEN: return PorterDuff.Mode.DARKEN;
+            case LIGHTEN: return PorterDuff.Mode.LIGHTEN;
+            case MULTIPLY:
+            case MODULATE:
+                return PorterDuff.Mode.MULTIPLY;
+            case SCREEN: return PorterDuff.Mode.SCREEN;
+            case PLUS: return PorterDuff.Mode.ADD;
+            case OVERLAY: return PorterDuff.Mode.OVERLAY;
+            default: return null;
         }
     }
 

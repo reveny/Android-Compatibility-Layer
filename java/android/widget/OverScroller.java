@@ -20,6 +20,11 @@ public class OverScroller
         mScroller = new Scroller(context, interpolator);
     }
 
+    public final void setFriction(float friction)
+    {
+        mScroller.setFriction(friction);
+    }
+
     public OverScroller(Context context, Interpolator interpolator, float bounceX, float bounceY)
     {
         this(context, interpolator);
@@ -109,7 +114,7 @@ public class OverScroller
         mScroller.fling(startX, startY, velocityX, velocityY, minX - overX, maxX + overX, minY - overY, maxY + overY);
     }
 
-    public void springBack(int startX, int startY, int minX, int maxX, int minY, int maxY)
+    public boolean springBack(int startX, int startY, int minX, int maxX, int minY, int maxY)
     {
         int targetX = Scroller.clamp(startX, minX, maxX);
         int targetY = Scroller.clamp(startY, minY, maxY);
@@ -117,10 +122,11 @@ public class OverScroller
         if (targetX == startX && targetY == startY)
         {
             mScroller.forceFinished(true);
-            return;
+            return false;
         }
 
         mScroller.startScroll(startX, startY, targetX - startX, targetY - startY);
+        return true;
     }
 
     public void notifyHorizontalEdgeReached(int start, int end, int overX)

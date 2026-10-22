@@ -7,6 +7,7 @@ public final class Looper
 
     final MessageQueue mQueue;
     final Thread mThread;
+    private volatile android.util.Printer mLogging;
 
     private Looper(boolean quitAllowed)
     {
@@ -65,9 +66,29 @@ public final class Looper
             Message message = looper.mQueue.next();
             if (message == null) return;
 
+            android.util.Printer logging = looper.mLogging;
+            if (logging != null)
+            {
+                logging.println(">>>>> Dispatching to " + message.target + " " + message.callback + ": " + message.what);
+            }
+
             message.target.dispatchMessage(message);
+
+            if (logging != null) logging.println("<<<<< Finished to " + message.target + " " + message.callback);
+
             message.recycleUnchecked();
         }
+    }
+
+    public void setMessageLogging(android.util.Printer printer)
+    {
+        mLogging = printer;
+    }
+
+    public void dump(android.util.Printer printer, String prefix)
+    {
+        printer.println(prefix + toString());
+        printer.println(prefix + "  (MessageQueue idle=" + mQueue.isIdle() + ")");
     }
 
     public MessageQueue getQueue()

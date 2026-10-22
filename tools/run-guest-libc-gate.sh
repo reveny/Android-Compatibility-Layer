@@ -88,4 +88,21 @@ if [ "$(contains "$work/guest.txt" 'guest: thread ')" -ne 4 ]; then
     exit 1
 fi
 
+"$CLANG" -O2 -fPIC -shared -march="$GUEST_ARCH" -Wl,-soname,libhello.so -Wl,--pack-dyn-relocs=android \
+    -o "$work/libhello-packed.so" "$SRC_DIR/hello.c" || exit 1
+
+"$binary" --guest "$work/libhello-packed.so" --tier "$tier" > "$work/packed.txt" 2> "$work/packed.log"
+if [ $? -ne 0 ]; then
+    cat "$work/packed.log" >&2
+    echo "gate FAILED: the guest library with Android packed relocations aborted" >&2
+    exit 1
+fi
+
+if ! diff -u "$work/host.txt" "$work/packed.txt"; then
+    echo "gate FAILED: packed relocations were not applied the way plain ones are" >&2
+    exit 1
+fi
+
+echo "  the same library with Android packed relocations behaves identically"
+
 echo "gate PASSED: an ARM64 .so called printf, malloc and pthread_create under $tier"

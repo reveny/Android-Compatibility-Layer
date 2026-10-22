@@ -3,8 +3,10 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <dlfcn.h>
 #include <map>
 #include <mutex>
 #include <unordered_map>
@@ -72,6 +74,20 @@ static constexpr int SLOT_THROW = (int)(offsetof(JNINativeInterface, Throw) / si
 static constexpr int SLOT_THROW_NEW = (int)(offsetof(JNINativeInterface, ThrowNew) / sizeof(void*));
 static constexpr int SLOT_GET_STRING_LENGTH = (int)(offsetof(JNINativeInterface, GetStringLength) / sizeof(void*));
 static constexpr int SLOT_GET_STRING_UTF_REGION = (int)(offsetof(JNINativeInterface, GetStringUTFRegion) / sizeof(void*));
+static constexpr int SLOT_NEW_STRING = (int)(offsetof(JNINativeInterface, NewString) / sizeof(void*));
+static constexpr int SLOT_GET_STRING_CHARS = (int)(offsetof(JNINativeInterface, GetStringChars) / sizeof(void*));
+static constexpr int SLOT_RELEASE_STRING_CHARS = (int)(offsetof(JNINativeInterface, ReleaseStringChars) / sizeof(void*));
+static constexpr int SLOT_GET_STRING_REGION = (int)(offsetof(JNINativeInterface, GetStringRegion) / sizeof(void*));
+static constexpr int SLOT_GET_STRING_CRITICAL = (int)(offsetof(JNINativeInterface, GetStringCritical) / sizeof(void*));
+static constexpr int SLOT_RELEASE_STRING_CRITICAL = (int)(offsetof(JNINativeInterface, ReleaseStringCritical) / sizeof(void*));
+static constexpr int SLOT_GET_PRIMITIVE_ARRAY_CRITICAL = (int)(offsetof(JNINativeInterface, GetPrimitiveArrayCritical) / sizeof(void*));
+static constexpr int SLOT_RELEASE_PRIMITIVE_ARRAY_CRITICAL =
+    (int)(offsetof(JNINativeInterface, ReleasePrimitiveArrayCritical) / sizeof(void*));
+static constexpr int SLOT_GET_OBJECT_REF_TYPE = (int)(offsetof(JNINativeInterface, GetObjectRefType) / sizeof(void*));
+static constexpr int SLOT_UNREGISTER_NATIVES = (int)(offsetof(JNINativeInterface, UnregisterNatives) / sizeof(void*));
+static constexpr int SLOT_FATAL_ERROR = (int)(offsetof(JNINativeInterface, FatalError) / sizeof(void*));
+static constexpr int SLOT_DEFINE_CLASS = (int)(offsetof(JNINativeInterface, DefineClass) / sizeof(void*));
+static constexpr uint64_t MAXIMUM_GUEST_STRING_CHARS = 1u << 28;
 static constexpr int SLOT_NEW_DIRECT_BYTE_BUFFER = (int)(offsetof(JNINativeInterface, NewDirectByteBuffer) / sizeof(void*));
 static constexpr int SLOT_GET_DIRECT_BUFFER_ADDRESS = (int)(offsetof(JNINativeInterface, GetDirectBufferAddress) / sizeof(void*));
 static constexpr int SLOT_GET_DIRECT_BUFFER_CAPACITY = (int)(offsetof(JNINativeInterface, GetDirectBufferCapacity) / sizeof(void*));
@@ -473,10 +489,17 @@ enum class CallVariant : uint8_t
     Array
 };
 
+enum class CallTarget : uint8_t
+{
+    Instance,
+    Static,
+    Nonvirtual
+};
+
 struct CallSlot
 {
     int slot;
-    bool isStatic;
+    CallTarget target;
 };
 
 static_assert(offsetof(JNINativeInterface, CallObjectMethodV) == offsetof(JNINativeInterface, CallObjectMethod) + sizeof(void*),
@@ -487,27 +510,41 @@ static_assert(offsetof(JNINativeInterface, CallStaticObjectMethodA) == offsetof(
                                                                            2 * sizeof(void*),
               "the static family must have the same three-slot shape");
 
+static_assert(offsetof(JNINativeInterface, CallNonvirtualObjectMethodA) == offsetof(JNINativeInterface, CallNonvirtualObjectMethod) +
+                                                                               2 * sizeof(void*),
+              "the nonvirtual family must have the same three-slot shape");
+
 static const CallSlot CALL_SLOTS[] = {
-    {(int)(offsetof(JNINativeInterface, CallObjectMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallBooleanMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallByteMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallCharMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallShortMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallIntMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallLongMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallFloatMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallDoubleMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallVoidMethod) / sizeof(void*)), false},
-    {(int)(offsetof(JNINativeInterface, CallStaticObjectMethod) / sizeof(void*)), true},
-    {(int)(offsetof(JNINativeInterface, CallStaticBooleanMethod) / sizeof(void*)), true},
-    {(int)(offsetof(JNINativeInterface, CallStaticByteMethod) / sizeof(void*)), true},
-    {(int)(offsetof(JNINativeInterface, CallStaticCharMethod) / sizeof(void*)), true},
-    {(int)(offsetof(JNINativeInterface, CallStaticShortMethod) / sizeof(void*)), true},
-    {(int)(offsetof(JNINativeInterface, CallStaticIntMethod) / sizeof(void*)), true},
-    {(int)(offsetof(JNINativeInterface, CallStaticLongMethod) / sizeof(void*)), true},
-    {(int)(offsetof(JNINativeInterface, CallStaticFloatMethod) / sizeof(void*)), true},
-    {(int)(offsetof(JNINativeInterface, CallStaticDoubleMethod) / sizeof(void*)), true},
-    {(int)(offsetof(JNINativeInterface, CallStaticVoidMethod) / sizeof(void*)), true},
+    {(int)(offsetof(JNINativeInterface, CallObjectMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallBooleanMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallByteMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallCharMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallShortMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallIntMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallLongMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallFloatMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallDoubleMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallVoidMethod) / sizeof(void*)), CallTarget::Instance},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualObjectMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualBooleanMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualByteMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualCharMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualShortMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualIntMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualLongMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualFloatMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualDoubleMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallNonvirtualVoidMethod) / sizeof(void*)), CallTarget::Nonvirtual},
+    {(int)(offsetof(JNINativeInterface, CallStaticObjectMethod) / sizeof(void*)), CallTarget::Static},
+    {(int)(offsetof(JNINativeInterface, CallStaticBooleanMethod) / sizeof(void*)), CallTarget::Static},
+    {(int)(offsetof(JNINativeInterface, CallStaticByteMethod) / sizeof(void*)), CallTarget::Static},
+    {(int)(offsetof(JNINativeInterface, CallStaticCharMethod) / sizeof(void*)), CallTarget::Static},
+    {(int)(offsetof(JNINativeInterface, CallStaticShortMethod) / sizeof(void*)), CallTarget::Static},
+    {(int)(offsetof(JNINativeInterface, CallStaticIntMethod) / sizeof(void*)), CallTarget::Static},
+    {(int)(offsetof(JNINativeInterface, CallStaticLongMethod) / sizeof(void*)), CallTarget::Static},
+    {(int)(offsetof(JNINativeInterface, CallStaticFloatMethod) / sizeof(void*)), CallTarget::Static},
+    {(int)(offsetof(JNINativeInterface, CallStaticDoubleMethod) / sizeof(void*)), CallTarget::Static},
+    {(int)(offsetof(JNINativeInterface, CallStaticVoidMethod) / sizeof(void*)), CallTarget::Static},
 };
 
 static constexpr int INVOKE_SLOT_DESTROY = (int)(offsetof(JNIInvokeInterface, DestroyJavaVM) / sizeof(void*));
@@ -732,9 +769,74 @@ static bool ReadGuestPointer(const GuestState::MemoryAccessor& memory, uint64_t 
     return memory.Read(memory.context, (GuestState::GuestAddress)address, &value, sizeof(value));
 }
 
+static thread_local jobject tLoadingClassLoader = nullptr;
+static std::mutex gApplicationLoaderLock;
+static jobject gApplicationClassLoader = nullptr;
+
+static void RememberApplicationLoader(JNIEnv* env, jobject loader)
+{
+    if (!loader) return;
+
+    std::lock_guard<std::mutex> guard(gApplicationLoaderLock);
+    if (!gApplicationClassLoader) gApplicationClassLoader = env->NewGlobalRef(loader);
+}
+
+static jclass FindClassThroughLoader(JNIEnv* env, const std::string& name)
+{
+    jobject loader = tLoadingClassLoader;
+    if (!loader)
+    {
+        std::lock_guard<std::mutex> guard(gApplicationLoaderLock);
+        loader = gApplicationClassLoader;
+    }
+
+    if (!loader) return nullptr;
+
+    jthrowable pending = env->ExceptionOccurred();
+    env->ExceptionClear();
+
+    std::string dotted = name;
+    for (char& character : dotted)
+    {
+        if (character == '/') character = '.';
+    }
+
+    jclass loaderClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadClass = loaderClass ? env->GetMethodID(loaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;") : nullptr;
+    if (loaderClass) env->DeleteLocalRef(loaderClass);
+
+    jclass found = nullptr;
+    if (loadClass)
+    {
+        jstring requested = env->NewStringUTF(dotted.c_str());
+        found = (jclass)env->CallObjectMethod(loader, loadClass, requested);
+        env->DeleteLocalRef(requested);
+    }
+
+    if (found && !env->ExceptionCheck())
+    {
+        if (pending) env->DeleteLocalRef(pending);
+        return found;
+    }
+
+    env->ExceptionClear();
+    if (found) env->DeleteLocalRef(found);
+
+    if (pending)
+    {
+        env->Throw(pending);
+        env->DeleteLocalRef(pending);
+    }
+
+    return nullptr;
+}
+
 static AbiBridge::Result UnimplementedSlot(JniBridgeState* state, const SlotBinding* binding)
 {
-    state->statistics.unimplementedSlotCalls += 1;
+    {
+        std::lock_guard<std::recursive_mutex> guard(state->mutex);
+        state->statistics.unimplementedSlotCalls += 1;
+    }
 
     char described[96];
     snprintf(described, sizeof(described), "%s slot %d (%s)", binding->invokeInterface ? "JNIInvokeInterface" : "JNINativeInterface",
@@ -806,9 +908,17 @@ static AbiBridge::Result InvokeSlotHandler(void* context, GuestState::Registers&
 static AbiBridge::Result RegisterNativesSlot(JniBridgeState* state, JNIEnv* env, GuestState::Registers& registers,
                                              const GuestState::MemoryAccessor& memory)
 {
+    std::lock_guard<std::recursive_mutex> guard(state->mutex);
+
     uint64_t declaringClass = registers.general[1];
     uint64_t table = registers.general[2];
     int32_t count = (int32_t)(uint32_t)registers.general[3];
+
+    if (count == 0 && declaringClass != 0)
+    {
+        registers.general[0] = (uint64_t)(uint32_t)JNI_OK;
+        return AbiBridge::Result::Ok;
+    }
 
     if (count < 0 || count > MAX_REGISTERED_NATIVES || table == 0)
     {
@@ -1055,16 +1165,18 @@ static bool BuildCallArguments(const std::vector<char>& letters, VarargCursor& c
     return !cursor.faulted;
 }
 
+static bool MethodDescriptorFor(JniBridgeState* state, JNIEnv* env, jclass owner, jmethodID method, bool isStatic, std::string& descriptor);
+
 static AbiBridge::Result NewObjectSlot(JniBridgeState* state, JNIEnv* env, CallVariant variant, GuestState::Registers& registers,
                                        const GuestState::MemoryAccessor& memory)
 {
     jclass owner = (jclass)registers.general[1];
     jmethodID method = (jmethodID)registers.general[2];
 
-    auto found = state->methodDescriptors.find((const void*)method);
-    if (found == state->methodDescriptors.end())
+    std::string descriptor;
+    if (!MethodDescriptorFor(state, env, owner, method, false, descriptor))
     {
-        fprintf(stderr, "[jnibridge] NewObject used jmethodID %p, which did not come from GetMethodID on this bridge, so its "
+        fprintf(stderr, "[jnibridge] NewObject used jmethodID %p, whose descriptor could not be recovered by reflection, so its "
                         "arguments cannot be marshalled\n",
                 (void*)method);
         return AbiBridge::Result::MalformedArguments;
@@ -1072,7 +1184,7 @@ static AbiBridge::Result NewObjectSlot(JniBridgeState* state, JNIEnv* env, CallV
 
     std::vector<char> letters;
     char returnLetter = 'V';
-    if (!SplitDescriptor(found->second.c_str(), letters, returnLetter)) return AbiBridge::Result::MalformedArguments;
+    if (!SplitDescriptor(descriptor.c_str(), letters, returnLetter)) return AbiBridge::Result::MalformedArguments;
 
     VarargCursor cursor;
     cursor.variant = variant;
@@ -1091,97 +1203,317 @@ static AbiBridge::Result NewObjectSlot(JniBridgeState* state, JNIEnv* env, CallV
     return AbiBridge::Result::Ok;
 }
 
-static AbiBridge::Result CallMethodSlot(JniBridgeState* state, JNIEnv* env, bool isStatic, CallVariant variant,
+static bool AppendTypeDescriptor(JNIEnv* env, jclass type, std::string& descriptor)
+{
+    if (!type) return false;
+
+    jclass classClass = env->FindClass("java/lang/Class");
+    if (!classClass) return false;
+
+    jmethodID getName = env->GetMethodID(classClass, "getName", "()Ljava/lang/String;");
+    jmethodID isPrimitive = env->GetMethodID(classClass, "isPrimitive", "()Z");
+    jmethodID isArray = env->GetMethodID(classClass, "isArray", "()Z");
+    env->DeleteLocalRef(classClass);
+    if (!getName || !isPrimitive || !isArray) return false;
+
+    jstring nameObject = (jstring)env->CallObjectMethod(type, getName);
+    if (!nameObject || env->ExceptionCheck()) return false;
+
+    const char* chars = env->GetStringUTFChars(nameObject, nullptr);
+    std::string name = chars ? chars : "";
+    if (chars) env->ReleaseStringUTFChars(nameObject, chars);
+    env->DeleteLocalRef(nameObject);
+
+    for (char& character : name)
+    {
+        if (character == '.') character = '/';
+    }
+
+    if (env->CallBooleanMethod(type, isPrimitive))
+    {
+        static const struct
+        {
+            const char* name;
+            char letter;
+        } PRIMITIVES[] = {{"boolean", 'Z'}, {"byte", 'B'}, {"char", 'C'}, {"short", 'S'}, {"int", 'I'},
+                          {"long", 'J'},    {"float", 'F'}, {"double", 'D'}, {"void", 'V'}};
+
+        for (const auto& primitive : PRIMITIVES)
+        {
+            if (name != primitive.name) continue;
+
+            descriptor.push_back(primitive.letter);
+            return true;
+        }
+
+        return false;
+    }
+
+    if (env->CallBooleanMethod(type, isArray)) descriptor += name;
+    else descriptor += "L" + name + ";";
+
+    return !env->ExceptionCheck();
+}
+
+static bool DescribeMethodByReflection(JNIEnv* env, jclass owner, jmethodID method, bool isStatic, std::string& descriptor)
+{
+    descriptor.clear();
+    if (!owner || !method) return false;
+
+    jobject reflected = env->ToReflectedMethod(owner, method, isStatic ? JNI_TRUE : JNI_FALSE);
+    if (!reflected || env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+        return false;
+    }
+
+    jclass reflectedClass = env->GetObjectClass(reflected);
+    jmethodID getParameterTypes = env->GetMethodID(reflectedClass, "getParameterTypes", "()[Ljava/lang/Class;");
+    jmethodID getReturnType = env->GetMethodID(reflectedClass, "getReturnType", "()Ljava/lang/Class;");
+    env->ExceptionClear();
+
+    bool described = false;
+    jobjectArray parameters = getParameterTypes ? (jobjectArray)env->CallObjectMethod(reflected, getParameterTypes) : nullptr;
+
+    if (parameters && !env->ExceptionCheck())
+    {
+        descriptor = "(";
+        described = true;
+
+        jsize count = env->GetArrayLength(parameters);
+        for (jsize index = 0; index < count && described; index++)
+        {
+            jclass parameter = (jclass)env->GetObjectArrayElement(parameters, index);
+            described = AppendTypeDescriptor(env, parameter, descriptor);
+            env->DeleteLocalRef(parameter);
+        }
+
+        descriptor += ")";
+
+        if (described && getReturnType)
+        {
+            jclass returned = (jclass)env->CallObjectMethod(reflected, getReturnType);
+            described = AppendTypeDescriptor(env, returned, descriptor);
+            if (returned) env->DeleteLocalRef(returned);
+        }
+        else if (described)
+        {
+            descriptor.push_back('V');
+        }
+    }
+
+    if (env->ExceptionCheck()) described = false;
+    env->ExceptionClear();
+
+    if (parameters) env->DeleteLocalRef(parameters);
+    env->DeleteLocalRef(reflectedClass);
+    env->DeleteLocalRef(reflected);
+
+    if (!described) descriptor.clear();
+    return described;
+}
+
+static bool MethodDescriptorFor(JniBridgeState* state, JNIEnv* env, jclass owner, jmethodID method, bool isStatic, std::string& descriptor)
+{
+    {
+        std::lock_guard<std::recursive_mutex> guard(state->mutex);
+        auto found = state->methodDescriptors.find((const void*)method);
+        if (found != state->methodDescriptors.end())
+        {
+            descriptor = found->second;
+            return true;
+        }
+    }
+
+    if (!DescribeMethodByReflection(env, owner, method, isStatic, descriptor)) return false;
+
+    std::lock_guard<std::recursive_mutex> guard(state->mutex);
+    state->methodDescriptors[(const void*)method] = descriptor;
+    return true;
+}
+
+struct CallOperands
+{
+    CallTarget target;
+    jobject receiver;
+    jclass owner;
+    jmethodID method;
+    const jvalue* arguments;
+};
+
+static void InvokeVoid(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) env->CallStaticVoidMethodA(call.owner, call.method, call.arguments);
+    else if (call.target == CallTarget::Nonvirtual) env->CallNonvirtualVoidMethodA(call.receiver, call.owner, call.method, call.arguments);
+    else env->CallVoidMethodA(call.receiver, call.method, call.arguments);
+}
+
+static jobject InvokeObject(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) return env->CallStaticObjectMethodA(call.owner, call.method, call.arguments);
+    if (call.target == CallTarget::Nonvirtual) return env->CallNonvirtualObjectMethodA(call.receiver, call.owner, call.method, call.arguments);
+    return env->CallObjectMethodA(call.receiver, call.method, call.arguments);
+}
+
+static jboolean InvokeBoolean(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) return env->CallStaticBooleanMethodA(call.owner, call.method, call.arguments);
+    if (call.target == CallTarget::Nonvirtual) return env->CallNonvirtualBooleanMethodA(call.receiver, call.owner, call.method, call.arguments);
+    return env->CallBooleanMethodA(call.receiver, call.method, call.arguments);
+}
+
+static jbyte InvokeByte(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) return env->CallStaticByteMethodA(call.owner, call.method, call.arguments);
+    if (call.target == CallTarget::Nonvirtual) return env->CallNonvirtualByteMethodA(call.receiver, call.owner, call.method, call.arguments);
+    return env->CallByteMethodA(call.receiver, call.method, call.arguments);
+}
+
+static jchar InvokeChar(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) return env->CallStaticCharMethodA(call.owner, call.method, call.arguments);
+    if (call.target == CallTarget::Nonvirtual) return env->CallNonvirtualCharMethodA(call.receiver, call.owner, call.method, call.arguments);
+    return env->CallCharMethodA(call.receiver, call.method, call.arguments);
+}
+
+static jshort InvokeShort(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) return env->CallStaticShortMethodA(call.owner, call.method, call.arguments);
+    if (call.target == CallTarget::Nonvirtual) return env->CallNonvirtualShortMethodA(call.receiver, call.owner, call.method, call.arguments);
+    return env->CallShortMethodA(call.receiver, call.method, call.arguments);
+}
+
+static jint InvokeInt(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) return env->CallStaticIntMethodA(call.owner, call.method, call.arguments);
+    if (call.target == CallTarget::Nonvirtual) return env->CallNonvirtualIntMethodA(call.receiver, call.owner, call.method, call.arguments);
+    return env->CallIntMethodA(call.receiver, call.method, call.arguments);
+}
+
+static jlong InvokeLong(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) return env->CallStaticLongMethodA(call.owner, call.method, call.arguments);
+    if (call.target == CallTarget::Nonvirtual) return env->CallNonvirtualLongMethodA(call.receiver, call.owner, call.method, call.arguments);
+    return env->CallLongMethodA(call.receiver, call.method, call.arguments);
+}
+
+static jfloat InvokeFloat(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) return env->CallStaticFloatMethodA(call.owner, call.method, call.arguments);
+    if (call.target == CallTarget::Nonvirtual) return env->CallNonvirtualFloatMethodA(call.receiver, call.owner, call.method, call.arguments);
+    return env->CallFloatMethodA(call.receiver, call.method, call.arguments);
+}
+
+static jdouble InvokeDouble(JNIEnv* env, const CallOperands& call)
+{
+    if (call.target == CallTarget::Static) return env->CallStaticDoubleMethodA(call.owner, call.method, call.arguments);
+    if (call.target == CallTarget::Nonvirtual) return env->CallNonvirtualDoubleMethodA(call.receiver, call.owner, call.method, call.arguments);
+    return env->CallDoubleMethodA(call.receiver, call.method, call.arguments);
+}
+
+static AbiBridge::Result CallMethodSlot(JniBridgeState* state, JNIEnv* env, CallTarget target, CallVariant variant,
                                         GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
 {
-    jobject receiver = (jobject)registers.general[1];
-    jmethodID method = (jmethodID)registers.general[2];
+    bool nonvirtual = target == CallTarget::Nonvirtual;
+    bool isStatic = target == CallTarget::Static;
+    int methodRegister = nonvirtual ? 3 : 2;
 
-    auto found = state->methodDescriptors.find((const void*)method);
-    if (found == state->methodDescriptors.end())
+    jobject receiver = (jobject)registers.general[1];
+    jmethodID method = (jmethodID)registers.general[methodRegister];
+
+    jclass lookupOwner = nullptr;
+    bool ownsLookupOwner = false;
+
+    if (isStatic) lookupOwner = (jclass)receiver;
+    else if (nonvirtual) lookupOwner = (jclass)registers.general[2];
+
+    std::string descriptor;
+    bool known = false;
     {
-        fprintf(stderr, "[jnibridge] a Call<Type>Method used jmethodID %p, which did not come from GetMethodID on this bridge, so its "
-                        "descriptor is unknown and its arguments cannot be marshalled\n",
+        std::lock_guard<std::recursive_mutex> guard(state->mutex);
+        auto cached = state->methodDescriptors.find((const void*)method);
+        if (cached != state->methodDescriptors.end())
+        {
+            descriptor = cached->second;
+            known = true;
+        }
+    }
+
+    if (!known)
+    {
+        if (!lookupOwner && receiver)
+        {
+            lookupOwner = env->GetObjectClass(receiver);
+            ownsLookupOwner = true;
+        }
+
+        known = MethodDescriptorFor(state, env, lookupOwner, method, isStatic, descriptor);
+        if (ownsLookupOwner) env->DeleteLocalRef(lookupOwner);
+    }
+
+    if (!known)
+    {
+        fprintf(stderr, "[jnibridge] a Call<Type>Method used jmethodID %p, whose descriptor could not be recovered by reflection, so "
+                        "its arguments cannot be marshalled\n",
                 (void*)method);
         return AbiBridge::Result::MalformedArguments;
     }
 
     if (state->traceCalls)
     {
+        std::lock_guard<std::recursive_mutex> guard(state->mutex);
         auto named = state->methodNames.find((const void*)method);
-        fprintf(stderr, "[jnicall] %s%s%s\n", isStatic ? "static " : "",
-                named == state->methodNames.end() ? "?" : named->second.c_str(), found->second.c_str());
+        const char* kind = isStatic ? "static " : (nonvirtual ? "nonvirtual " : "");
+        fprintf(stderr, "[jnicall] %s%s%s\n", kind, named == state->methodNames.end() ? "?" : named->second.c_str(), descriptor.c_str());
         fflush(stderr);
     }
 
     std::vector<char> letters;
     char returnLetter = 'V';
-    if (!SplitDescriptor(found->second.c_str(), letters, returnLetter)) return AbiBridge::Result::MalformedArguments;
+    if (!SplitDescriptor(descriptor.c_str(), letters, returnLetter)) return AbiBridge::Result::MalformedArguments;
+
+    int argumentRegister = methodRegister + 1;
 
     VarargCursor cursor;
     cursor.variant = variant;
     cursor.registers = &registers;
     cursor.memory = &memory;
     cursor.stackCursor = registers.stackPointer;
+    cursor.integerIndex = argumentRegister;
 
-    if (variant == CallVariant::Array) cursor.arrayCursor = registers.general[3];
-    if (variant == CallVariant::VaList && !LoadGuestVaList(cursor, registers.general[3])) return AbiBridge::Result::MalformedArguments;
+    if (variant == CallVariant::Array) cursor.arrayCursor = registers.general[argumentRegister];
+    if (variant == CallVariant::VaList && !LoadGuestVaList(cursor, registers.general[argumentRegister]))
+    {
+        return AbiBridge::Result::MalformedArguments;
+    }
 
     std::vector<jvalue> values;
     if (!BuildCallArguments(letters, cursor, values)) return AbiBridge::Result::MalformedArguments;
 
-    const jvalue* arguments = values.empty() ? nullptr : values.data();
-    jclass owner = (jclass)receiver;
+    CallOperands call;
+    call.target = target;
+    call.receiver = receiver;
+    call.owner = nonvirtual ? (jclass)registers.general[2] : (jclass)receiver;
+    call.method = method;
+    call.arguments = values.empty() ? nullptr : values.data();
 
     switch (returnLetter)
     {
-        case 'V':
-            if (isStatic) env->CallStaticVoidMethodA(owner, method, arguments);
-            else env->CallVoidMethodA(receiver, method, arguments);
-            return AbiBridge::Result::Ok;
+        case 'V': InvokeVoid(env, call); return AbiBridge::Result::Ok;
 
         case 'L':
-        case '[':
-            registers.general[0] = (uint64_t)(isStatic ? env->CallStaticObjectMethodA(owner, method, arguments)
-                                                       : env->CallObjectMethodA(receiver, method, arguments));
-            return AbiBridge::Result::Ok;
+        case '[': registers.general[0] = (uint64_t)InvokeObject(env, call); return AbiBridge::Result::Ok;
 
-        case 'Z':
-            registers.general[0] = (isStatic ? env->CallStaticBooleanMethodA(owner, method, arguments)
-                                             : env->CallBooleanMethodA(receiver, method, arguments))
-                                       ? 1
-                                       : 0;
-            return AbiBridge::Result::Ok;
-
-        case 'B':
-            registers.general[0] = (uint64_t)(uint32_t)(isStatic ? env->CallStaticByteMethodA(owner, method, arguments)
-                                                                 : env->CallByteMethodA(receiver, method, arguments));
-            return AbiBridge::Result::Ok;
-
-        case 'C':
-            registers.general[0] = (uint64_t)(uint32_t)(isStatic ? env->CallStaticCharMethodA(owner, method, arguments)
-                                                                 : env->CallCharMethodA(receiver, method, arguments));
-            return AbiBridge::Result::Ok;
-
-        case 'S':
-            registers.general[0] = (uint64_t)(uint32_t)(isStatic ? env->CallStaticShortMethodA(owner, method, arguments)
-                                                                 : env->CallShortMethodA(receiver, method, arguments));
-            return AbiBridge::Result::Ok;
-
-        case 'I':
-            registers.general[0] = (uint64_t)(uint32_t)(isStatic ? env->CallStaticIntMethodA(owner, method, arguments)
-                                                                 : env->CallIntMethodA(receiver, method, arguments));
-            return AbiBridge::Result::Ok;
-
-        case 'J':
-            registers.general[0] = (uint64_t)(isStatic ? env->CallStaticLongMethodA(owner, method, arguments)
-                                                       : env->CallLongMethodA(receiver, method, arguments));
-            return AbiBridge::Result::Ok;
+        case 'Z': registers.general[0] = InvokeBoolean(env, call) ? 1 : 0; return AbiBridge::Result::Ok;
+        case 'B': registers.general[0] = (uint64_t)(uint32_t)InvokeByte(env, call); return AbiBridge::Result::Ok;
+        case 'C': registers.general[0] = (uint64_t)(uint32_t)InvokeChar(env, call); return AbiBridge::Result::Ok;
+        case 'S': registers.general[0] = (uint64_t)(uint32_t)InvokeShort(env, call); return AbiBridge::Result::Ok;
+        case 'I': registers.general[0] = (uint64_t)(uint32_t)InvokeInt(env, call); return AbiBridge::Result::Ok;
+        case 'J': registers.general[0] = (uint64_t)InvokeLong(env, call); return AbiBridge::Result::Ok;
 
         case 'F':
         {
-            float returned = isStatic ? env->CallStaticFloatMethodA(owner, method, arguments)
-                                      : env->CallFloatMethodA(receiver, method, arguments);
+            float returned = InvokeFloat(env, call);
 
             uint32_t bits = 0;
             memcpy(&bits, &returned, sizeof(bits));
@@ -1192,8 +1524,7 @@ static AbiBridge::Result CallMethodSlot(JniBridgeState* state, JNIEnv* env, bool
 
         case 'D':
         {
-            double returned = isStatic ? env->CallStaticDoubleMethodA(owner, method, arguments)
-                                       : env->CallDoubleMethodA(receiver, method, arguments);
+            double returned = InvokeDouble(env, call);
 
             uint64_t bits = 0;
             memcpy(&bits, &returned, sizeof(bits));
@@ -1219,8 +1550,10 @@ static AbiBridge::Result NativeSlotHandler(void* context, GuestState::Registers&
         return AbiBridge::Result::Ok;
     }
 
-    std::lock_guard<std::recursive_mutex> guard(state->mutex);
-    state->statistics.slotCalls += 1;
+    {
+        std::lock_guard<std::recursive_mutex> guard(state->mutex);
+        state->statistics.slotCalls += 1;
+    }
 
     if (registers.general[0] != (uint64_t)state->guestEnv)
     {
@@ -1246,6 +1579,7 @@ static AbiBridge::Result NativeSlotHandler(void* context, GuestState::Registers&
             if (!ReadGuestString(memory, registers.general[1], name)) return AbiBridge::Result::MalformedArguments;
 
             jclass found = env->FindClass(name.c_str());
+            if (!found) found = FindClassThroughLoader(env, name);
 
             if (!found)
             {
@@ -1318,6 +1652,7 @@ static AbiBridge::Result NativeSlotHandler(void* context, GuestState::Registers&
 
             if (method)
             {
+                std::lock_guard<std::recursive_mutex> guard(state->mutex);
                 state->methodDescriptors[(const void*)method] = descriptor;
                 state->methodNames[(const void*)method] = name;
             }
@@ -1534,6 +1869,128 @@ static AbiBridge::Result NativeSlotHandler(void* context, GuestState::Registers&
             return AbiBridge::Result::Ok;
         }
 
+        case SLOT_NEW_STRING:
+        {
+            uint64_t source = registers.general[1];
+            jsize length = (jsize)(int32_t)(uint32_t)registers.general[2];
+            if (length < 0 || (uint64_t)length > MAXIMUM_GUEST_STRING_CHARS || (length > 0 && source == 0))
+            {
+                return AbiBridge::Result::MalformedArguments;
+            }
+
+            std::vector<jchar> characters((size_t)length);
+            if (length > 0 &&
+                !memory.Read(memory.context, (GuestState::GuestAddress)source, characters.data(), (uint64_t)length * sizeof(jchar)))
+            {
+                return AbiBridge::Result::MalformedArguments;
+            }
+
+            registers.general[0] = (uint64_t)env->NewString(characters.data(), length);
+            return AbiBridge::Result::Ok;
+        }
+
+        case SLOT_GET_STRING_CHARS:
+        case SLOT_GET_STRING_CRITICAL:
+        {
+            jboolean copied = JNI_FALSE;
+            jstring text = (jstring)registers.general[1];
+            const jchar* characters = binding->slot == SLOT_GET_STRING_CHARS ? env->GetStringChars(text, &copied)
+                                                                              : env->GetStringCritical(text, &copied);
+
+            uint64_t destination = registers.general[2];
+            if (destination != 0 && !memory.Write(memory.context, (GuestState::GuestAddress)destination, &copied, sizeof(copied)))
+                return AbiBridge::Result::MalformedArguments;
+
+            registers.general[0] = (uint64_t)characters;
+            return AbiBridge::Result::Ok;
+        }
+
+        case SLOT_RELEASE_STRING_CHARS:
+            env->ReleaseStringChars((jstring)registers.general[1], (const jchar*)registers.general[2]);
+            return AbiBridge::Result::Ok;
+
+        case SLOT_RELEASE_STRING_CRITICAL:
+            env->ReleaseStringCritical((jstring)registers.general[1], (const jchar*)registers.general[2]);
+            return AbiBridge::Result::Ok;
+
+        case SLOT_GET_STRING_REGION:
+        {
+            jstring text = (jstring)registers.general[1];
+            jsize start = (jsize)registers.general[2];
+            jsize count = (jsize)registers.general[3];
+            uint64_t out = registers.general[4];
+
+            if (count < 0 || (count > 0 && out == 0)) return AbiBridge::Result::MalformedArguments;
+
+            std::vector<jchar> buffer((size_t)count);
+            env->GetStringRegion(text, start, count, buffer.data());
+            if (env->ExceptionCheck()) return AbiBridge::Result::Ok;
+
+            if (count > 0 && !memory.Write(memory.context, (GuestState::GuestAddress)out, buffer.data(), (uint64_t)count * sizeof(jchar)))
+            {
+                return AbiBridge::Result::MalformedArguments;
+            }
+
+            return AbiBridge::Result::Ok;
+        }
+
+        case SLOT_GET_PRIMITIVE_ARRAY_CRITICAL:
+        {
+            jboolean copied = JNI_FALSE;
+            void* elements = env->GetPrimitiveArrayCritical((jarray)registers.general[1], &copied);
+
+            uint64_t destination = registers.general[2];
+            if (destination != 0 && !memory.Write(memory.context, (GuestState::GuestAddress)destination, &copied, sizeof(copied)))
+                return AbiBridge::Result::MalformedArguments;
+
+            registers.general[0] = (uint64_t)elements;
+            return AbiBridge::Result::Ok;
+        }
+
+        case SLOT_RELEASE_PRIMITIVE_ARRAY_CRITICAL:
+            env->ReleasePrimitiveArrayCritical((jarray)registers.general[1], (void*)registers.general[2],
+                                               (jint)(int32_t)(uint32_t)registers.general[3]);
+            return AbiBridge::Result::Ok;
+
+        case SLOT_GET_OBJECT_REF_TYPE:
+            registers.general[0] = (uint64_t)(uint32_t)env->GetObjectRefType((jobject)registers.general[1]);
+            return AbiBridge::Result::Ok;
+
+        case SLOT_UNREGISTER_NATIVES:
+            registers.general[0] = (uint64_t)(uint32_t)env->UnregisterNatives((jclass)registers.general[1]);
+            return AbiBridge::Result::Ok;
+
+        case SLOT_DEFINE_CLASS:
+        {
+            std::string name;
+            if (registers.general[1] != 0 && !ReadGuestString(memory, registers.general[1], name)) return AbiBridge::Result::MalformedArguments;
+
+            jsize length = (jsize)(int32_t)(uint32_t)registers.general[4];
+            if (length < 0 || (length > 0 && registers.general[3] == 0)) return AbiBridge::Result::MalformedArguments;
+
+            std::vector<jbyte> bytes((size_t)length);
+            if (length > 0 &&
+                !memory.Read(memory.context, (GuestState::GuestAddress)registers.general[3], bytes.data(), (uint64_t)length))
+            {
+                return AbiBridge::Result::MalformedArguments;
+            }
+
+            registers.general[0] = (uint64_t)env->DefineClass(registers.general[1] ? name.c_str() : nullptr,
+                                                               (jobject)registers.general[2], bytes.data(), length);
+            return AbiBridge::Result::Ok;
+        }
+
+        case SLOT_FATAL_ERROR:
+        {
+            std::string message;
+            if (registers.general[1] == 0 || !ReadGuestString(memory, registers.general[1], message)) message = "(no message)";
+
+            fprintf(stderr, "[jnibridge] the guest raised a JNI fatal error: %s\n", message.c_str());
+            fflush(stderr);
+            env->FatalError(message.c_str());
+            return AbiBridge::Result::Ok;
+        }
+
         case SLOT_NEW_DIRECT_BYTE_BUFFER:
             registers.general[0] = (uint64_t)env->NewDirectByteBuffer((void*)registers.general[1], (jlong)registers.general[2]);
             return AbiBridge::Result::Ok;
@@ -1580,9 +2037,9 @@ static AbiBridge::Result NativeSlotHandler(void* context, GuestState::Registers&
 
     for (const CallSlot& call : CALL_SLOTS)
     {
-        if (binding->slot == call.slot) return CallMethodSlot(state, env, call.isStatic, CallVariant::Standard, registers, memory);
-        if (binding->slot == call.slot + 1) return CallMethodSlot(state, env, call.isStatic, CallVariant::VaList, registers, memory);
-        if (binding->slot == call.slot + 2) return CallMethodSlot(state, env, call.isStatic, CallVariant::Array, registers, memory);
+        if (binding->slot == call.slot) return CallMethodSlot(state, env, call.target, CallVariant::Standard, registers, memory);
+        if (binding->slot == call.slot + 1) return CallMethodSlot(state, env, call.target, CallVariant::VaList, registers, memory);
+        if (binding->slot == call.slot + 2) return CallMethodSlot(state, env, call.target, CallVariant::Array, registers, memory);
     }
 
     return UnimplementedSlot(state, binding);
@@ -1721,7 +2178,29 @@ static std::string UnescapeMangledPart(const std::string& part)
         if (following == '1') plain.push_back('_');
         else if (following == '2') plain.push_back(';');
         else if (following == '3') plain.push_back('[');
-        else if (following == '0') index += 4;
+        else if (following == '0')
+        {
+            if (index + 5 >= part.size()) break;
+
+            unsigned long codeUnit = strtoul(part.substr(index + 2, 4).c_str(), nullptr, 16);
+            if (codeUnit < 0x80)
+            {
+                plain.push_back((char)codeUnit);
+            }
+            else if (codeUnit < 0x800)
+            {
+                plain.push_back((char)(0xc0 | (codeUnit >> 6)));
+                plain.push_back((char)(0x80 | (codeUnit & 0x3f)));
+            }
+            else
+            {
+                plain.push_back((char)(0xe0 | (codeUnit >> 12)));
+                plain.push_back((char)(0x80 | ((codeUnit >> 6) & 0x3f)));
+                plain.push_back((char)(0x80 | (codeUnit & 0x3f)));
+            }
+
+            index += 4;
+        }
         else
         {
             plain.push_back(part[index]);
@@ -2198,9 +2677,17 @@ JniBridge::Result JniBridge::RegisterLoaderFunctions(Instance& bridge)
 
     const HandlerEntry handlers[] = {
         {"dlopen", &OpenLibraryHandler},
+        {"android_dlopen_ext", &OpenLibraryHandler},
         {"dlsym", &FindSymbolHandler},
+        {"dlvsym", &FindSymbolHandler},
         {"dlclose", &CloseLibraryHandler},
         {"dlerror", &LibraryErrorHandler},
+        {"__loader_dlopen", &OpenLibraryHandler},
+        {"__loader_android_dlopen_ext", &OpenLibraryHandler},
+        {"__loader_dlsym", &FindSymbolHandler},
+        {"__loader_dlvsym", &FindSymbolHandler},
+        {"__loader_dlclose", &CloseLibraryHandler},
+        {"__loader_dlerror", &LibraryErrorHandler},
     };
 
     AbiBridge::Registry& registry = GuestRuntime::BridgeRegistry(*state->runtime);
@@ -2247,6 +2734,9 @@ JniBridge::Result JniBridge::LoadGuestLibrary(Instance& bridge, const std::strin
     return Result::Ok;
 }
 
+static jint LoadGuestAndRunOnLoad(JniBridgeState* state, const std::string& path, const char* soname);
+static jint RunGuestOnLoad(JniBridgeState* state, uint32_t moduleId, const char* soname);
+
 extern "C" jint AclLoadGuestLibrary(const char* soname, JavaVM* vm, void* reserved)
 {
     (void)vm;
@@ -2267,11 +2757,36 @@ extern "C" jint AclLoadGuestLibrary(const char* soname, JavaVM* vm, void* reserv
         return JNI_ERR;
     }
 
-    std::string path = directory + "/" + soname;
+    return LoadGuestAndRunOnLoad(state, directory + "/" + soname, soname);
+}
 
+static std::mutex gOnLoadLock;
+static std::unordered_map<uint32_t, jint> gOnLoadVersions;
+
+static jint LoadGuestAndRunOnLoad(JniBridgeState* state, const std::string& path, const char* soname)
+{
     uint32_t moduleId = ElfLoader::INVALID_MODULE_ID;
     if (!LoadTranslateAndInitialize(state, path, moduleId)) return JNI_ERR;
 
+    {
+        std::lock_guard<std::mutex> guard(gOnLoadLock);
+        auto earlier = gOnLoadVersions.find(moduleId);
+        if (earlier != gOnLoadVersions.end()) return earlier->second;
+    }
+
+    jint version = RunGuestOnLoad(state, moduleId, soname);
+
+    if (version != JNI_ERR)
+    {
+        std::lock_guard<std::mutex> guard(gOnLoadLock);
+        gOnLoadVersions[moduleId] = version;
+    }
+
+    return version;
+}
+
+static jint RunGuestOnLoad(JniBridgeState* state, uint32_t moduleId, const char* soname)
+{
     GuestState::GuestAddress entry{};
     if (ElfLoader::LookupExportIn(GuestRuntime::LibraryNamespace(*state->runtime), moduleId, "JNI_OnLoad", entry) !=
         ElfLoader::Result::Ok)
@@ -2312,6 +2827,119 @@ JniBridge::Result JniBridge::InstallLibraryLoader(Instance& bridge, const std::s
     std::lock_guard<std::mutex> guard(loaderMutex);
     activeLoaderState = state;
     activeLoaderDirectory = guestLibraryDirectory;
+
+    return Result::Ok;
+}
+
+static constexpr uint16_t ELF_MACHINE_AARCH64 = 183;
+static constexpr size_t ELF_HEADER_PROBE_BYTES = 20;
+
+typedef jstring (*HostNativeLoad)(JNIEnv* env, jstring filename, jobject loader, jclass caller);
+
+static bool IsGuestElf(const std::string& path)
+{
+    FILE* file = fopen(path.c_str(), "rb");
+    if (!file) return false;
+
+    unsigned char header[ELF_HEADER_PROBE_BYTES] = {};
+    size_t read = fread(header, 1, sizeof(header), file);
+    fclose(file);
+
+    if (read < sizeof(header)) return false;
+    if (header[0] != 0x7f || header[1] != 'E' || header[2] != 'L' || header[3] != 'F') return false;
+
+    uint16_t machine = (uint16_t)(header[18] | (header[19] << 8));
+    return machine == ELF_MACHINE_AARCH64;
+}
+
+static HostNativeLoad FindHostNativeLoad()
+{
+    void* found = dlsym(RTLD_DEFAULT, "JVM_NativeLoad");
+    if (found) return (HostNativeLoad)found;
+
+    const char* libraries[] = {"libopenjdkjvm.so", "libopenjdkjvmd.so"};
+    for (const char* library : libraries)
+    {
+        void* handle = dlopen(library, RTLD_NOW | RTLD_NOLOAD);
+        if (!handle) continue;
+
+        found = dlsym(handle, "JVM_NativeLoad");
+        if (found) return (HostNativeLoad)found;
+    }
+
+    fprintf(stderr, "[jnibridge] JVM_NativeLoad was not found in the loaded ART libraries\n");
+    return nullptr;
+}
+
+static jstring RuntimeNativeLoad(JNIEnv* env, jclass, jstring filename, jobject loader, jclass caller)
+{
+    if (!filename) return env->NewStringUTF("the library path is null");
+
+    const char* chars = env->GetStringUTFChars(filename, nullptr);
+    std::string path = chars ? chars : "";
+    if (chars) env->ReleaseStringUTFChars(filename, chars);
+
+    JniBridgeState* state = nullptr;
+    {
+        std::lock_guard<std::mutex> guard(loaderMutex);
+        state = activeLoaderState;
+    }
+
+    RememberApplicationLoader(env, loader);
+
+    if (state && IsGuestElf(path))
+    {
+        size_t slash = path.rfind('/');
+        std::string leaf = slash == std::string::npos ? path : path.substr(slash + 1);
+
+        fprintf(stderr, "[jnibridge] System.load of the arm64 library %s goes to the guest runtime\n", path.c_str());
+
+        jobject previousLoader = tLoadingClassLoader;
+        tLoadingClassLoader = loader;
+        jint loaded = LoadGuestAndRunOnLoad(state, path, leaf.c_str());
+        tLoadingClassLoader = previousLoader;
+
+        if (loaded == JNI_ERR)
+        {
+            return env->NewStringUTF(("dlopen failed: the guest runtime could not load \"" + path + "\"").c_str());
+        }
+
+        return nullptr;
+    }
+
+    static HostNativeLoad hostNativeLoad = FindHostNativeLoad();
+    if (!hostNativeLoad) return env->NewStringUTF("JVM_NativeLoad is unavailable, so the host cannot load native libraries");
+
+    return hostNativeLoad(env, filename, loader, caller);
+}
+
+JniBridge::Result JniBridge::InstallRuntimeLoadHook(JNIEnv* env)
+{
+    if (!env) return Result::NotInitialized;
+    if (!FindHostNativeLoad()) return Result::RegistrationFailed;
+
+    jclass runtime = env->FindClass("java/lang/Runtime");
+    if (!runtime)
+    {
+        env->ExceptionClear();
+        return Result::RegistrationFailed;
+    }
+
+    const JNINativeMethod methods[] = {
+        {const_cast<char*>("nativeLoad"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/String;"),
+         reinterpret_cast<void*>(&RuntimeNativeLoad)},
+    };
+
+    jint registered = env->RegisterNatives(runtime, methods, 1);
+    env->DeleteLocalRef(runtime);
+
+    if (registered != JNI_OK)
+    {
+        env->ExceptionClear();
+        fprintf(stderr, "[jnibridge] cannot route System.load through the guest runtime, so arm64 libraries an app unpacks itself "
+                        "will not load\n");
+        return Result::RegistrationFailed;
+    }
 
     return Result::Ok;
 }

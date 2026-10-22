@@ -21,6 +21,22 @@ public class PorterDuffColorFilter extends ColorFilter
         return mMode;
     }
 
+    @Override
+    public boolean equals(Object other)
+    {
+        if (this == other) return true;
+        if (!(other instanceof PorterDuffColorFilter)) return false;
+
+        PorterDuffColorFilter that = (PorterDuffColorFilter)other;
+        return mColor == that.mColor && mMode == that.mMode;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return 31 * mMode.hashCode() + mColor;
+    }
+
     int apply(int source)
     {
         switch (mMode)

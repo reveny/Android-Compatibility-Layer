@@ -1,125 +1,382 @@
 package android.animation;
 
-import java.lang.reflect.Method;
+import android.graphics.Path;
+import android.graphics.PointF;
+import android.util.Property;
+
+import java.util.ArrayList;
 
 public final class ObjectAnimator extends ValueAnimator
 {
+    private static final ArrayList<ObjectAnimator> sStartedAnimators = new ArrayList<>();
+
     private Object mTarget;
     private String mPropertyName;
-    private Method mSetter;
-    private boolean mSetterResolved;
+    private Property mProperty;
+    private boolean mAutoCancel;
 
     public ObjectAnimator()
     {
     }
 
-    public static ObjectAnimator ofFloat(Object target, String propertyName, float... values)
+    private ObjectAnimator(Object target, String propertyName)
     {
-        ObjectAnimator animator = new ObjectAnimator();
+        setTarget(target);
+        setPropertyName(propertyName);
+    }
 
-        animator.mTarget = target;
-        animator.mPropertyName = propertyName;
-        animator.setFloatValues(values);
-
-        return animator;
+    private <T> ObjectAnimator(T target, Property<T, ?> property)
+    {
+        setTarget(target);
+        setProperty(property);
     }
 
     public static ObjectAnimator ofInt(Object target, String propertyName, int... values)
     {
-        ObjectAnimator animator = new ObjectAnimator();
-
-        animator.mTarget = target;
-        animator.mPropertyName = propertyName;
+        ObjectAnimator animator = new ObjectAnimator(target, propertyName);
         animator.setIntValues(values);
 
         return animator;
     }
 
-    public static ObjectAnimator ofArgb(Object target, String propertyName, int... values)
+    public static ObjectAnimator ofInt(Object target, String xPropertyName, String yPropertyName, Path path)
     {
-        return ofInt(target, propertyName, values);
+        PathKeyframes keyframes = KeyframeSet.ofPath(path);
+        PropertyValuesHolder x = PropertyValuesHolder.ofXInt(xPropertyName, null, keyframes, true);
+        PropertyValuesHolder y = PropertyValuesHolder.ofXInt(yPropertyName, null, keyframes, false);
+
+        return ofPropertyValuesHolder(target, x, y);
     }
 
-    public static <T> ObjectAnimator ofFloat(T target, android.util.Property<T, Float> property, float... values)
+    public static <T> ObjectAnimator ofInt(T target, Property<T, Integer> property, int... values)
     {
-        ObjectAnimator animator = new ObjectAnimator();
+        ObjectAnimator animator = new ObjectAnimator(target, property);
+        animator.setIntValues(values);
 
-        animator.mTarget = target;
-        animator.setProperty(property);
+        return animator;
+    }
+
+    public static <T> ObjectAnimator ofInt(T target, Property<T, Integer> xProperty, Property<T, Integer> yProperty, Path path)
+    {
+        PathKeyframes keyframes = KeyframeSet.ofPath(path);
+        PropertyValuesHolder x = PropertyValuesHolder.ofXInt(null, xProperty, keyframes, true);
+        PropertyValuesHolder y = PropertyValuesHolder.ofXInt(null, yProperty, keyframes, false);
+
+        return ofPropertyValuesHolder(target, x, y);
+    }
+
+    public static ObjectAnimator ofMultiInt(Object target, String propertyName, int[][] values)
+    {
+        PropertyValuesHolder holder = PropertyValuesHolder.ofMultiInt(propertyName, values);
+        return ofPropertyValuesHolder(target, holder);
+    }
+
+    public static ObjectAnimator ofMultiInt(Object target, String propertyName, Path path)
+    {
+        PropertyValuesHolder holder = PropertyValuesHolder.ofMultiInt(propertyName, path);
+        return ofPropertyValuesHolder(target, holder);
+    }
+
+    @SafeVarargs
+    public static <T> ObjectAnimator ofMultiInt(Object target, String propertyName, TypeConverter<T, int[]> converter,
+                                                TypeEvaluator<T> evaluator, T... values)
+    {
+        PropertyValuesHolder holder = PropertyValuesHolder.ofMultiInt(propertyName, converter, evaluator, values);
+        return ObjectAnimator.ofPropertyValuesHolder(target, holder);
+    }
+
+    public static ObjectAnimator ofArgb(Object target, String propertyName, int... values)
+    {
+        ObjectAnimator animator = ofInt(target, propertyName, values);
+        animator.setEvaluator(ArgbEvaluator.getInstance());
+
+        return animator;
+    }
+
+    public static <T> ObjectAnimator ofArgb(T target, Property<T, Integer> property, int... values)
+    {
+        ObjectAnimator animator = ofInt(target, property, values);
+        animator.setEvaluator(ArgbEvaluator.getInstance());
+
+        return animator;
+    }
+
+    public static ObjectAnimator ofFloat(Object target, String propertyName, float... values)
+    {
+        ObjectAnimator animator = new ObjectAnimator(target, propertyName);
         animator.setFloatValues(values);
 
         return animator;
     }
 
-    public static <T> ObjectAnimator ofInt(T target, android.util.Property<T, Integer> property, int... values)
+    public static ObjectAnimator ofFloat(Object target, String xPropertyName, String yPropertyName, Path path)
     {
-        ObjectAnimator animator = new ObjectAnimator();
+        PathKeyframes keyframes = KeyframeSet.ofPath(path);
+        PropertyValuesHolder x = PropertyValuesHolder.ofXFloat(xPropertyName, null, keyframes, true);
+        PropertyValuesHolder y = PropertyValuesHolder.ofXFloat(yPropertyName, null, keyframes, false);
 
-        animator.mTarget = target;
-        animator.setProperty(property);
-        animator.setIntValues(values);
+        return ofPropertyValuesHolder(target, x, y);
+    }
+
+    public static <T> ObjectAnimator ofFloat(T target, Property<T, Float> property, float... values)
+    {
+        ObjectAnimator animator = new ObjectAnimator(target, property);
+        animator.setFloatValues(values);
 
         return animator;
     }
 
-    public static <T> ObjectAnimator ofArgb(T target, android.util.Property<T, Integer> property, int... values)
+    public static <T> ObjectAnimator ofFloat(T target, Property<T, Float> xProperty, Property<T, Float> yProperty, Path path)
     {
-        return ofInt(target, property, values);
+        PathKeyframes keyframes = KeyframeSet.ofPath(path);
+        PropertyValuesHolder x = PropertyValuesHolder.ofXFloat(null, xProperty, keyframes, true);
+        PropertyValuesHolder y = PropertyValuesHolder.ofXFloat(null, yProperty, keyframes, false);
+
+        return ofPropertyValuesHolder(target, x, y);
     }
 
-    @SuppressWarnings("unchecked")
-    public void setProperty(android.util.Property property)
+    public static ObjectAnimator ofMultiFloat(Object target, String propertyName, float[][] values)
     {
-        mProperty = property;
-        mPropertyName = property == null ? null : property.getName();
+        PropertyValuesHolder holder = PropertyValuesHolder.ofMultiFloat(propertyName, values);
+        return ofPropertyValuesHolder(target, holder);
     }
 
-    public android.util.Property getProperty()
+    public static ObjectAnimator ofMultiFloat(Object target, String propertyName, Path path)
     {
-        return mProperty;
+        PropertyValuesHolder holder = PropertyValuesHolder.ofMultiFloat(propertyName, path);
+        return ofPropertyValuesHolder(target, holder);
     }
 
-    private android.util.Property mProperty;
+    @SafeVarargs
+    public static <T> ObjectAnimator ofMultiFloat(Object target, String propertyName, TypeConverter<T, float[]> converter,
+                                                  TypeEvaluator<T> evaluator, T... values)
+    {
+        PropertyValuesHolder holder = PropertyValuesHolder.ofMultiFloat(propertyName, converter, evaluator, values);
+        return ObjectAnimator.ofPropertyValuesHolder(target, holder);
+    }
+
+    public static ObjectAnimator ofObject(Object target, String propertyName, TypeEvaluator evaluator, Object... values)
+    {
+        ObjectAnimator animator = new ObjectAnimator(target, propertyName);
+        animator.setObjectValues(values);
+        animator.setEvaluator(evaluator);
+
+        return animator;
+    }
+
+    public static ObjectAnimator ofObject(Object target, String propertyName, TypeConverter<PointF, ?> converter, Path path)
+    {
+        PropertyValuesHolder holder = PropertyValuesHolder.ofObject(propertyName, converter, path);
+        return ofPropertyValuesHolder(target, holder);
+    }
+
+    @SafeVarargs
+    public static <T, V> ObjectAnimator ofObject(T target, Property<T, V> property, TypeEvaluator<V> evaluator, V... values)
+    {
+        ObjectAnimator animator = new ObjectAnimator(target, property);
+        animator.setObjectValues(values);
+        animator.setEvaluator(evaluator);
+
+        return animator;
+    }
+
+    @SafeVarargs
+    public static <T, V, P> ObjectAnimator ofObject(T target, Property<T, P> property, TypeConverter<V, P> converter,
+                                                    TypeEvaluator<V> evaluator, V... values)
+    {
+        PropertyValuesHolder holder = PropertyValuesHolder.ofObject(property, converter, evaluator, values);
+        return ofPropertyValuesHolder(target, holder);
+    }
+
+    public static <T, V> ObjectAnimator ofObject(T target, Property<T, V> property, TypeConverter<PointF, V> converter, Path path)
+    {
+        PropertyValuesHolder holder = PropertyValuesHolder.ofObject(property, converter, path);
+        return ofPropertyValuesHolder(target, holder);
+    }
 
     public static ObjectAnimator ofPropertyValuesHolder(Object target, PropertyValuesHolder... values)
     {
         ObjectAnimator animator = new ObjectAnimator();
-
-        animator.mTarget = target;
-
-        if (values != null && values.length > 0)
-        {
-            animator.mPropertyName = values[0].getPropertyName();
-            values[0].applyTo(animator);
-        }
+        animator.setTarget(target);
+        animator.setValues(values);
 
         return animator;
     }
 
-    public void setTarget(Object target)
-    {
-        if (mTarget == target) return;
-
-        mTarget = target;
-        mSetter = null;
-        mSetterResolved = false;
-    }
-
-    public Object getTarget()
-    {
-        return mTarget;
-    }
-
     public void setPropertyName(String propertyName)
     {
+        if (mValues != null)
+        {
+            PropertyValuesHolder holder = mValues[0];
+            String oldName = holder.getPropertyName();
+            holder.setPropertyName(propertyName);
+            mValuesMap.remove(oldName);
+            mValuesMap.put(propertyName, holder);
+        }
+
         mPropertyName = propertyName;
-        mSetter = null;
-        mSetterResolved = false;
+        mInitialized = false;
+    }
+
+    public void setProperty(Property property)
+    {
+        if (mValues != null)
+        {
+            PropertyValuesHolder holder = mValues[0];
+            String oldName = holder.getPropertyName();
+            holder.setProperty(property);
+            mValuesMap.remove(oldName);
+            mValuesMap.put(mPropertyName, holder);
+        }
+
+        if (mProperty != null) mPropertyName = property.getName();
+
+        mProperty = property;
+        mInitialized = false;
+    }
+
+    public Property getProperty()
+    {
+        return mProperty;
     }
 
     public String getPropertyName()
     {
-        return mPropertyName;
+        if (mPropertyName != null) return mPropertyName;
+        if (mProperty != null) return mProperty.getName();
+
+        if (mValues != null && mValues.length > 0)
+        {
+            StringBuilder builder = new StringBuilder();
+
+            for (int index = 0; index < mValues.length; index++)
+            {
+                if (index > 0) builder.append(',');
+                builder.append(mValues[index].getPropertyName());
+            }
+
+            return builder.toString();
+        }
+
+        return null;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public void setIntValues(int... values)
+    {
+        if (mValues == null || mValues.length == 0)
+        {
+            if (mProperty != null) setValues(PropertyValuesHolder.ofInt(mProperty, values));
+            else setValues(PropertyValuesHolder.ofInt(mPropertyName, values));
+
+            return;
+        }
+
+        super.setIntValues(values);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public void setFloatValues(float... values)
+    {
+        if (mValues == null || mValues.length == 0)
+        {
+            if (mProperty != null) setValues(PropertyValuesHolder.ofFloat(mProperty, values));
+            else setValues(PropertyValuesHolder.ofFloat(mPropertyName, values));
+
+            return;
+        }
+
+        super.setFloatValues(values);
+    }
+
+    @Override
+    public void setObjectValues(Object... values)
+    {
+        if (mValues == null || mValues.length == 0)
+        {
+            if (mProperty != null) setValues(PropertyValuesHolder.ofObject(mProperty, (TypeEvaluator)null, values));
+            else setValues(PropertyValuesHolder.ofObject(mPropertyName, (TypeEvaluator)null, values));
+
+            return;
+        }
+
+        super.setObjectValues(values);
+    }
+
+    public void setAutoCancel(boolean cancel)
+    {
+        mAutoCancel = cancel;
+    }
+
+    private boolean hasSameTargetAndProperties(ObjectAnimator other)
+    {
+        PropertyValuesHolder[] theirValues = other.getValues();
+
+        if (other.getTarget() != getTarget() || mValues == null || theirValues == null) return false;
+        if (mValues.length != theirValues.length) return false;
+
+        for (int index = 0; index < mValues.length; index++)
+        {
+            PropertyValuesHolder mine = mValues[index];
+            PropertyValuesHolder theirs = theirValues[index];
+
+            if (mine.getPropertyName() == null || !mine.getPropertyName().equals(theirs.getPropertyName())) return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    public void start()
+    {
+        ArrayList<ObjectAnimator> started;
+
+        synchronized (sStartedAnimators)
+        {
+            for (int index = sStartedAnimators.size() - 1; index >= 0; index--)
+            {
+                if (!sStartedAnimators.get(index).isStarted()) sStartedAnimators.remove(index);
+            }
+
+            started = new ArrayList<>(sStartedAnimators);
+        }
+
+        if (mAutoCancel)
+        {
+            for (int index = 0; index < started.size(); index++)
+            {
+                ObjectAnimator other = started.get(index);
+                if (other != this && other.isStarted() && hasSameTargetAndProperties(other)) other.cancel();
+            }
+        }
+
+        super.start();
+
+        if (isStarted())
+        {
+            synchronized (sStartedAnimators)
+            {
+                if (!sStartedAnimators.contains(this)) sStartedAnimators.add(this);
+            }
+        }
+    }
+
+    @Override
+    void initAnimation()
+    {
+        if (!mInitialized)
+        {
+            Object target = getTarget();
+
+            if (target != null && mValues != null)
+            {
+                for (int index = 0; index < mValues.length; index++) mValues[index].setupSetterAndGetter(target);
+            }
+
+            super.initAnimation();
+        }
     }
 
     @Override
@@ -129,159 +386,72 @@ public final class ObjectAnimator extends ValueAnimator
         return this;
     }
 
+    public Object getTarget()
+    {
+        return mTarget;
+    }
+
     @Override
-    @SuppressWarnings("unchecked")
-    protected void onAnimatedValue(float value)
+    public void setTarget(Object target)
     {
-        if (mTarget == null) return;
+        if (mTarget == target) return;
 
-        if (mProperty != null)
-        {
-            if (mProperty instanceof android.util.FloatProperty)
-            {
-                ((android.util.FloatProperty)mProperty).setValue(mTarget, value);
-                return;
-            }
+        if (isStarted()) cancel();
 
-            if (mProperty instanceof android.util.IntProperty)
-            {
-                ((android.util.IntProperty)mProperty).setValue(mTarget, Math.round(value));
-                return;
-            }
-
-            Class<?> type = mProperty.getType();
-
-            if (type == Integer.class) mProperty.set(mTarget, Integer.valueOf(Math.round(value)));
-            else mProperty.set(mTarget, Float.valueOf(value));
-
-            return;
-        }
-
-        if (mPropertyName == null) return;
-
-        if (mTarget instanceof android.view.View && applyToView((android.view.View)mTarget, value)) return;
-
-        invokeSetter(value);
+        mTarget = target;
+        mInitialized = false;
     }
 
-    private boolean applyToView(android.view.View view, float value)
+    @Override
+    public void setupStartValues()
     {
-        if ("alpha".equals(mPropertyName))
-        {
-            view.setAlpha(value);
-            return true;
-        }
+        initAnimation();
 
-        if ("translationX".equals(mPropertyName))
-        {
-            view.setTranslationX(value);
-            return true;
-        }
+        Object target = getTarget();
+        if (target == null || mValues == null) return;
 
-        if ("translationY".equals(mPropertyName))
-        {
-            view.setTranslationY(value);
-            return true;
-        }
-
-        if ("scaleX".equals(mPropertyName))
-        {
-            view.setScaleX(value);
-            return true;
-        }
-
-        if ("scaleY".equals(mPropertyName))
-        {
-            view.setScaleY(value);
-            return true;
-        }
-
-        if ("rotation".equals(mPropertyName))
-        {
-            view.setRotation(value);
-            return true;
-        }
-
-        if ("rotationX".equals(mPropertyName))
-        {
-            view.setRotationX(value);
-            return true;
-        }
-
-        if ("rotationY".equals(mPropertyName))
-        {
-            view.setRotationY(value);
-            return true;
-        }
-
-        if ("x".equals(mPropertyName))
-        {
-            view.setX(value);
-            return true;
-        }
-
-        if ("y".equals(mPropertyName))
-        {
-            view.setY(value);
-            return true;
-        }
-
-        if ("scrollX".equals(mPropertyName))
-        {
-            view.setScrollX(Math.round(value));
-            return true;
-        }
-
-        if ("scrollY".equals(mPropertyName))
-        {
-            view.setScrollY(Math.round(value));
-            return true;
-        }
-
-        return false;
+        for (int index = 0; index < mValues.length; index++) mValues[index].setupStartValue(target);
     }
 
-    private void invokeSetter(float value)
+    @Override
+    public void setupEndValues()
     {
-        if (!mSetterResolved) resolveSetter();
+        initAnimation();
 
-        if (mSetter == null) return;
+        Object target = getTarget();
+        if (target == null || mValues == null) return;
 
-        try
-        {
-            Class<?> parameter = mSetter.getParameterTypes()[0];
-
-            if (parameter == int.class) mSetter.invoke(mTarget, Math.round(value));
-            else mSetter.invoke(mTarget, value);
-        }
-        catch (ReflectiveOperationException failure)
-        {
-            mSetter = null;
-        }
+        for (int index = 0; index < mValues.length; index++) mValues[index].setupEndValue(target);
     }
 
-    private void resolveSetter()
+    @Override
+    void animateValue(float fraction)
     {
-        mSetterResolved = true;
+        Object target = getTarget();
 
-        String name = "set" + Character.toUpperCase(mPropertyName.charAt(0)) + mPropertyName.substring(1);
+        super.animateValue(fraction);
 
-        try
+        if (target == null || mValues == null) return;
+
+        for (int index = 0; index < mValues.length; index++) mValues[index].setAnimatedValue(target);
+    }
+
+    @Override
+    public ObjectAnimator clone()
+    {
+        return (ObjectAnimator)super.clone();
+    }
+
+    @Override
+    public String toString()
+    {
+        StringBuilder builder = new StringBuilder("ObjectAnimator@" + Integer.toHexString(hashCode()) + ", target " + getTarget());
+
+        if (mValues != null)
         {
-            mSetter = mTarget.getClass().getMethod(name, float.class);
-            return;
-        }
-        catch (NoSuchMethodException ignored)
-        {
+            for (int index = 0; index < mValues.length; index++) builder.append("\n    ").append(mValues[index].toString());
         }
 
-        try
-        {
-            mSetter = mTarget.getClass().getMethod(name, int.class);
-        }
-        catch (NoSuchMethodException ignored)
-        {
-            android.util.Log.w("ObjectAnimator", "no setter " + name + " on " + mTarget.getClass().getName());
-        }
+        return builder.toString();
     }
 }

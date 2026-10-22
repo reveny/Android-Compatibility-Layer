@@ -641,6 +641,20 @@ static AbiBridge::Result StreamTextHandler(void* context, GuestState::Registers&
     return AbiBridge::Result::Ok;
 }
 
+static constexpr uint32_t OPENSL_RESULT_FEATURE_UNSUPPORTED = 12;
+
+static AbiBridge::Result OpenSlUnsupportedHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t engineOut = registers.general[0];
+    uint64_t none = 0;
+
+    if (engineOut != 0 && !memory.Write(memory.context, (GuestState::GuestAddress)engineOut, &none, sizeof(none)))
+        return AbiBridge::Result::MalformedArguments;
+
+    registers.general[0] = OPENSL_RESULT_FEATURE_UNSUPPORTED;
+    return AbiBridge::Result::Ok;
+}
+
 NativeActivity::Result NativeActivity::RegisterAudioFunctions(GuestRuntime::Instance& runtime)
 {
     struct HandlerEntry
@@ -699,6 +713,7 @@ NativeActivity::Result NativeActivity::RegisterAudioFunctions(GuestRuntime::Inst
         {"AAudioStreamBuilder_setSessionId", &BuilderSetHandler, (void*)11},
         {"AAudio_convertResultToText", &StreamTextHandler, nullptr},
         {"AAudio_convertStreamStateToText", &StreamTextHandler, (void*)1},
+        {"slCreateEngine", &OpenSlUnsupportedHandler, nullptr},
     };
 
     gAudioRuntime = &runtime;

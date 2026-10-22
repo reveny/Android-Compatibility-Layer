@@ -60,6 +60,28 @@ static jint TypefaceCreate(JNIEnv* env, jclass, jstring familyName, jint weight,
     return static_cast<jint>(font);
 }
 
+static jint TypefaceLoadFromMemory(JNIEnv* env, jclass, jbyteArray data, jint weight, jboolean italic)
+{
+    if (!data || !EnsureFontStack()) return 0;
+
+    jsize length = env->GetArrayLength(data);
+    if (length <= 0) return 0;
+
+    std::vector<uint8_t> bytes(static_cast<size_t>(length));
+    env->GetByteArrayRegion(data, 0, length, reinterpret_cast<jbyte*>(bytes.data()));
+    if (env->ExceptionCheck()) return 0;
+
+    uint32_t font = FontStack::INVALID_FONT;
+    FontStack::Result loaded = FontStack::LoadFontFromMemory(bytes.data(), bytes.size(), weight, italic == JNI_TRUE, font);
+    if (loaded != FontStack::Result::Ok)
+    {
+        fprintf(stderr, "[text] a %d byte app font could not be loaded: %s\n", static_cast<int>(length), FontStack::ResultName(loaded));
+        return 0;
+    }
+
+    return static_cast<jint>(font);
+}
+
 static jint TypefaceWeight(JNIEnv*, jclass, jint font)
 {
     int weight = FontStack::WEIGHT_NORMAL;
@@ -194,6 +216,7 @@ static const JNINativeMethod TYPEFACE_METHODS[] = {
     {"nativeResolveFamily", "(Ljava/lang/String;IZ)I", reinterpret_cast<void*>(&TypefaceCreate)},
     {"nativeWeight", "(I)I", reinterpret_cast<void*>(&TypefaceWeight)},
     {"nativeIsItalic", "(I)Z", reinterpret_cast<void*>(&TypefaceIsItalic)},
+    {"nativeLoadFromMemory", "([BIZ)I", reinterpret_cast<void*>(&TypefaceLoadFromMemory)},
 };
 
 static const JNINativeMethod PAINT_METHODS[] = {

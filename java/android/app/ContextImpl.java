@@ -37,6 +37,7 @@ public class ContextImpl extends Context
     private android.app.WallpaperManager mWallpaperManager;
     private android.appwidget.AppWidgetManager mAppWidgetManager;
     private android.app.SearchManager mSearchManager;
+    private final java.util.Map<String, Object> mServices = new java.util.HashMap<>();
 
     public ContextImpl(ApplicationInfo applicationInfo, PackageManager packageManager, Resources resources, ClassLoader classLoader,
                        String dataDir)
@@ -336,8 +337,75 @@ public class ContextImpl extends Context
             return mSearchManager;
         }
 
+        synchronized (mServices)
+        {
+            Object cached = mServices.get(name);
+            if (cached != null) return cached;
+
+            Object created = createService(name);
+            if (created != null)
+            {
+                mServices.put(name, created);
+                return created;
+            }
+        }
+
         runtime.Strict.unimplemented("android.content.Context.getSystemService(" + name + ")");
         return null;
+    }
+
+    private Object createService(String name)
+    {
+        if (name == null) return null;
+
+        switch (name)
+        {
+            case Context.APP_OPS_SERVICE: return new AppOpsManager(this);
+            case Context.CAMERA_SERVICE: return new android.hardware.camera2.CameraManager(this);
+            case Context.MEDIA_SESSION_SERVICE: return new android.media.session.MediaSessionManager(this);
+            case Context.MEDIA_ROUTER_SERVICE: return new android.media.MediaRouter(this);
+            case Context.MEDIA_METRICS_SERVICE: return new android.media.metrics.MediaMetricsManager(this);
+            case Context.MIDI_SERVICE: return new android.media.midi.MidiManager(this);
+            case Context.MEDIA_PROJECTION_SERVICE: return new android.media.projection.MediaProjectionManager(this);
+            case Context.TV_INPUT_SERVICE: return new android.media.tv.TvInputManager(this);
+            case Context.TELEPHONY_SUBSCRIPTION_SERVICE: return new android.telephony.SubscriptionManager(this);
+            case Context.TELECOM_SERVICE: return new android.telecom.TelecomManager(this);
+            case Context.CONSUMER_IR_SERVICE: return new android.hardware.ConsumerIrManager(this);
+            case Context.INPUT_SERVICE: return new android.hardware.input.InputManager(this);
+            case Context.USB_SERVICE: return new android.hardware.usb.UsbManager(this);
+            case Context.BIOMETRIC_SERVICE: return new android.hardware.biometrics.BiometricManager(this);
+            case Context.FINGERPRINT_SERVICE: return new android.hardware.fingerprint.FingerprintManager(this);
+            case Context.NFC_SERVICE: return new android.nfc.NfcManager(this);
+            case Context.PRINT_SERVICE: return new android.print.PrintManager(this);
+            case Context.CAPTIONING_SERVICE: return android.view.accessibility.CaptioningManager.getInstance();
+            case Context.CONTENT_CAPTURE_MANAGER_SERVICE: return android.view.contentcapture.ContentCaptureManager.getInstance();
+            case Context.TEXT_CLASSIFICATION_SERVICE: return android.view.textclassifier.TextClassificationManager.getInstance();
+            case Context.UI_MODE_SERVICE: return new UiModeManager(this);
+            case Context.KEYGUARD_SERVICE: return new KeyguardManager(this);
+            case Context.DOWNLOAD_SERVICE: return new DownloadManager(this);
+            case Context.GAME_SERVICE: return new GameManager(this);
+            case Context.USAGE_STATS_SERVICE: return new android.app.usage.UsageStatsManager(this);
+            case Context.STORAGE_STATS_SERVICE: return new android.app.usage.StorageStatsManager(this);
+            case Context.NETWORK_STATS_SERVICE: return new android.app.usage.NetworkStatsManager(this);
+            case Context.ACCOUNT_SERVICE: return new android.accounts.AccountManager(this);
+            case Context.LOCATION_SERVICE: return new android.location.LocationManager(this);
+            case Context.BATTERY_SERVICE: return new android.os.BatteryManager(this);
+            case Context.STORAGE_SERVICE: return new android.os.storage.StorageManager(this);
+            case Context.VIBRATOR_MANAGER_SERVICE: return new android.os.VibratorManager(this);
+            case Context.PERFORMANCE_HINT_SERVICE: return new android.os.PerformanceHintManager(this);
+            case Context.DROPBOX_SERVICE: return new android.os.DropBoxManager(this);
+            case Context.WIFI_SERVICE: return new android.net.wifi.WifiManager(this);
+            case Context.WIFI_P2P_SERVICE: return new android.net.wifi.p2p.WifiP2pManager(this);
+            case Context.NSD_SERVICE: return new android.net.nsd.NsdManager(this);
+            case Context.BLUETOOTH_SERVICE: return new android.bluetooth.BluetoothManager(this);
+            case Context.RESTRICTIONS_SERVICE: return new android.content.RestrictionsManager(this);
+            case Context.GRAMMATICAL_INFLECTION_SERVICE: return new GrammaticalInflectionManager(this);
+            case Context.DEVICE_POLICY_SERVICE: return new android.app.admin.DevicePolicyManager(this);
+            case Context.SYSTEM_HEALTH_SERVICE: return new android.os.health.SystemHealthManager();
+            case Context.POWER_WHITELIST_MANAGER: return new android.os.PowerWhitelistManager(this);
+            case Context.POWER_EXEMPTION_SERVICE: return new android.os.PowerExemptionManager(this);
+            default: return null;
+        }
     }
 
     @Override

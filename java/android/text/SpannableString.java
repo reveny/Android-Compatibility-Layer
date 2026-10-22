@@ -1,160 +1,113 @@
 package android.text;
 
-import java.util.ArrayList;
-import java.util.List;
-
-public class SpannableString implements Spannable, GetChars, CharSequence
+public class SpannableString implements CharSequence, GetChars, Spannable
 {
-    private final String mText;
-    private final List<Record> mSpans = new ArrayList<>();
+    private final SpannableStringInternal mStore;
 
     public SpannableString(CharSequence source)
     {
-        mText = source == null ? "" : source.toString();
+        this(source, false);
+    }
 
-        if (source instanceof Spanned) copySpansFrom((Spanned) source);
+    SpannableString(CharSequence source, boolean ignoreNoCopySpan)
+    {
+        CharSequence text = source == null ? "" : source;
+        mStore = new SpannableStringInternal(this, text, 0, text.length(), ignoreNoCopySpan);
+    }
+
+    private SpannableString(CharSequence source, int start, int end)
+    {
+        mStore = new SpannableStringInternal(this, source, start, end, false);
     }
 
     public static SpannableString valueOf(CharSequence source)
     {
-        if (source instanceof SpannableString) return (SpannableString) source;
+        if (source instanceof SpannableString) return (SpannableString)source;
 
         return new SpannableString(source);
     }
 
-    private void copySpansFrom(Spanned source)
+    @Override
+    public void setSpan(Object what, int start, int end, int flags)
     {
-        for (Object span : source.getSpans(0, source.length(), Object.class))
-        {
-            setSpan(span, source.getSpanStart(span), source.getSpanEnd(span), source.getSpanFlags(span));
-        }
+        mStore.setSpan(what, start, end, flags);
     }
 
     @Override
-    public int length()
+    public void removeSpan(Object what)
     {
-        return mText.length();
+        mStore.removeSpan(what);
     }
 
     @Override
-    public char charAt(int index)
+    public final CharSequence subSequence(int start, int end)
     {
-        return mText.charAt(index);
+        return new SpannableString(this, start, end);
     }
 
     @Override
-    public CharSequence subSequence(int start, int end)
+    public final void getChars(int start, int end, char[] destination, int offset)
     {
-        return new SpannableString(mText.substring(start, end));
+        mStore.getChars(start, end, destination, offset);
     }
 
     @Override
-    public String toString()
+    public final int length()
     {
-        return mText;
+        return mStore.length();
     }
 
     @Override
-    public void getChars(int start, int end, char[] destination, int destinationStart)
+    public int getSpanStart(Object what)
     {
-        mText.getChars(start, end, destination, destinationStart);
+        return mStore.getSpanStart(what);
     }
 
     @Override
-    public void setSpan(Object span, int start, int end, int flags)
+    public int getSpanFlags(Object what)
     {
-        if (span == null) return;
-
-        removeSpan(span);
-        mSpans.add(new Record(span, start, end, flags));
-    }
-
-    @Override
-    public void removeSpan(Object span)
-    {
-        for (int index = mSpans.size() - 1; index >= 0; index--)
-        {
-            if (mSpans.get(index).span == span) mSpans.remove(index);
-        }
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public <T> T[] getSpans(int start, int end, Class<T> kind)
-    {
-        List<T> found = new ArrayList<>();
-
-        for (Record record : mSpans)
-        {
-            if (record.end < start || record.start > end) continue;
-            if (kind != null && !kind.isInstance(record.span)) continue;
-
-            found.add((T) record.span);
-        }
-
-        return found.toArray((T[]) java.lang.reflect.Array.newInstance(kind == null ? Object.class : kind, found.size()));
-    }
-
-    @Override
-    public int getSpanStart(Object span)
-    {
-        Record record = recordFor(span);
-        return record == null ? -1 : record.start;
-    }
-
-    @Override
-    public int getSpanEnd(Object span)
-    {
-        Record record = recordFor(span);
-        return record == null ? -1 : record.end;
-    }
-
-    @Override
-    public int getSpanFlags(Object span)
-    {
-        Record record = recordFor(span);
-        return record == null ? 0 : record.flags;
+        return mStore.getSpanFlags(what);
     }
 
     @Override
     public int nextSpanTransition(int start, int limit, Class kind)
     {
-        int next = limit;
-
-        for (Record record : mSpans)
-        {
-            if (kind != null && !kind.isInstance(record.span)) continue;
-
-            if (record.start > start && record.start < next) next = record.start;
-            if (record.end > start && record.end < next) next = record.end;
-        }
-
-        return next;
+        return mStore.nextSpanTransition(start, limit, kind);
     }
 
-    private Record recordFor(Object span)
+    @Override
+    public <T> T[] getSpans(int queryStart, int queryEnd, Class<T> kind)
     {
-        for (Record record : mSpans)
-        {
-            if (record.span == span) return record;
-        }
-
-        return null;
+        return mStore.getSpans(queryStart, queryEnd, kind);
     }
 
-    private static final class Record
+    @Override
+    public int hashCode()
     {
-        final Object span;
-        final int start;
-        final int end;
-        final int flags;
+        return mStore.hashCode();
+    }
 
-        Record(Object span, int start, int end, int flags)
-        {
-            this.span = span;
-            this.start = start;
-            this.end = end;
-            this.flags = flags;
-        }
+    @Override
+    public boolean equals(Object other)
+    {
+        return mStore.equals(other);
+    }
+
+    @Override
+    public int getSpanEnd(Object what)
+    {
+        return mStore.getSpanEnd(what);
+    }
+
+    @Override
+    public final String toString()
+    {
+        return mStore.toString();
+    }
+
+    @Override
+    public final char charAt(int index)
+    {
+        return mStore.charAt(index);
     }
 }

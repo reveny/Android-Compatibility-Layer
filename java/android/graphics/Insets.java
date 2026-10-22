@@ -1,8 +1,23 @@
 package android.graphics;
 
-public final class Insets
+public final class Insets implements android.os.Parcelable
 {
     public static final Insets NONE = new Insets(0, 0, 0, 0);
+
+    public static final android.os.Parcelable.Creator<Insets> CREATOR = new android.os.Parcelable.Creator<Insets>()
+    {
+        @Override
+        public Insets createFromParcel(android.os.Parcel source)
+        {
+            return of(source.readInt(), source.readInt(), source.readInt(), source.readInt());
+        }
+
+        @Override
+        public Insets[] newArray(int size)
+        {
+            return new Insets[size];
+        }
+    };
 
     public final int left;
     public final int top;
@@ -42,6 +57,32 @@ public final class Insets
     {
         return of(Math.max(first.left, second.left), Math.max(first.top, second.top), Math.max(first.right, second.right),
                   Math.max(first.bottom, second.bottom));
+    }
+
+    public static Insets min(Insets first, Insets second)
+    {
+        return of(Math.min(first.left, second.left), Math.min(first.top, second.top), Math.min(first.right, second.right),
+                  Math.min(first.bottom, second.bottom));
+    }
+
+    public static Insets subtract(Insets first, Insets second)
+    {
+        return of(first.left - second.left, first.top - second.top, first.right - second.right, first.bottom - second.bottom);
+    }
+
+    @Override
+    public int describeContents()
+    {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(android.os.Parcel out, int flags)
+    {
+        out.writeInt(left);
+        out.writeInt(top);
+        out.writeInt(right);
+        out.writeInt(bottom);
     }
 
     @Override

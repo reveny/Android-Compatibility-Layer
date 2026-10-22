@@ -426,6 +426,21 @@ public final class RenderNode
         return true;
     }
 
+    private RenderEffect mRenderEffect;
+
+    public boolean setRenderEffect(RenderEffect renderEffect)
+    {
+        if (mRenderEffect == renderEffect) return false;
+
+        mRenderEffect = renderEffect;
+        return true;
+    }
+
+    public RenderEffect getRenderEffect()
+    {
+        return mRenderEffect;
+    }
+
     public boolean getUseCompositingLayer()
     {
         return mUseCompositingLayer;

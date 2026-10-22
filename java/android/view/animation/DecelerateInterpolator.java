@@ -1,6 +1,9 @@
 package android.view.animation;
 
-public class DecelerateInterpolator implements Interpolator
+import android.content.Context;
+import android.util.AttributeSet;
+
+public class DecelerateInterpolator extends BaseInterpolator
 {
     private final float mFactor;
 
@@ -14,9 +17,9 @@ public class DecelerateInterpolator implements Interpolator
         mFactor = factor;
     }
 
-    public DecelerateInterpolator(android.content.Context context, android.util.AttributeSet attributes)
+    public DecelerateInterpolator(Context context, AttributeSet attributes)
     {
-        this(1.0f);
+        this(new AnimationAttributes(context, attributes).getFloat("factor", 1.0f));
     }
 
     @Override

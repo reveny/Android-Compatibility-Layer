@@ -27,6 +27,22 @@ public class RadialGradient extends Shader
         this(centreX, centreY, radius, new int[] {centreColor, edgeColor}, null, tileMode);
     }
 
+    public RadialGradient(float centreX, float centreY, float radius, long[] colors, float[] positions, TileMode tileMode)
+    {
+        this(centreX, centreY, radius, argbColors(colors), positions, tileMode);
+    }
+
+    public RadialGradient(float startX, float startY, float startRadius, float endX, float endY, float endRadius, long[] colors,
+                          float[] positions, TileMode tileMode)
+    {
+        this(endX, endY, endRadius, argbColors(colors), positions, tileMode);
+    }
+
+    public RadialGradient(float centreX, float centreY, float radius, long centreColor, long edgeColor, TileMode tileMode)
+    {
+        this(centreX, centreY, radius, new long[] {centreColor, edgeColor}, null, tileMode);
+    }
+
     @Override
     int kind()
     {

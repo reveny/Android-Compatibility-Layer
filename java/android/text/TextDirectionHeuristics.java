@@ -1,6 +1,6 @@
 package android.text;
 
-public final class TextDirectionHeuristics
+public class TextDirectionHeuristics
 {
     public static final TextDirectionHeuristic LTR = new Fixed(false);
     public static final TextDirectionHeuristic RTL = new Fixed(true);
@@ -9,7 +9,7 @@ public final class TextDirectionHeuristics
     public static final TextDirectionHeuristic ANYRTL_LTR = new AnyRtl();
     public static final TextDirectionHeuristic LOCALE = new FirstStrong(false);
 
-    private TextDirectionHeuristics()
+    public TextDirectionHeuristics()
     {
     }
 

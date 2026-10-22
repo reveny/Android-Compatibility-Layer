@@ -40,6 +40,8 @@ namespace Apk
     inline constexpr uint32_t ATTRIBUTE_VERSION_CODE_MAJOR = 0x01010576;
     inline constexpr uint32_t ATTRIBUTE_TASK_AFFINITY = 0x01010012;
     inline constexpr uint32_t ATTRIBUTE_GRANT_URI_PERMISSIONS = 0x0101001b;
+    inline constexpr uint32_t ATTRIBUTE_ENABLED = 0x0101000e;
+    inline constexpr uint32_t ATTRIBUTE_PROCESS = 0x01010011;
     inline constexpr uint32_t ATTRIBUTE_LAUNCH_MODE = 0x0101001d;
     inline constexpr uint32_t ATTRIBUTE_CONFIG_CHANGES = 0x0101001f;
     inline constexpr uint32_t ATTRIBUTE_DEBUGGABLE = 0x0101000f;
@@ -47,6 +49,7 @@ namespace Apk
     inline constexpr uint32_t ATTRIBUTE_AUTHORITIES = 0x01010018;
     inline constexpr uint32_t ATTRIBUTE_PRIORITY = 0x0101001c;
     inline constexpr uint32_t ATTRIBUTE_VALUE = 0x01010024;
+    inline constexpr uint32_t ATTRIBUTE_RESOURCE = 0x01010025;
     inline constexpr uint32_t ATTRIBUTE_MIME_TYPE = 0x01010026;
     inline constexpr uint32_t ATTRIBUTE_SCHEME = 0x01010027;
     inline constexpr uint32_t ATTRIBUTE_TARGET_ACTIVITY = 0x01010202;
@@ -79,10 +82,16 @@ namespace Apk
         uint16_t compressionMethod = COMPRESSION_STORED;
     };
 
+    inline constexpr int32_t META_DATA_NO_VALUE = -1;
+    inline constexpr int32_t META_DATA_RESOURCE = -2;
+
     struct MetaDataEntry
     {
         std::string name;
         std::string value;
+        int32_t valueType = META_DATA_NO_VALUE;
+        uint32_t valueData = 0;
+        uint32_t resource = 0;
     };
 
     struct IntentFilterInfo
@@ -102,6 +111,8 @@ namespace Apk
         bool exported = false;
         bool directBootAware = false;
         bool grantUriPermissions = false;
+        bool enabled = true;
+        std::string process;
     };
 
     struct ActivityInfo
@@ -152,11 +163,13 @@ namespace Apk
         int targetSdkVersion = 0;
         bool debuggable = false;
         bool extractNativeLibs = true;
+        std::vector<MetaDataEntry> applicationMetaData;
         std::vector<ActivityInfo> activities;
         std::vector<ProviderInfo> providers;
         std::vector<ServiceInfo> services;
         std::vector<ReceiverInfo> receivers;
         std::vector<std::string> permissions;
+        std::vector<std::string> usesLibraries;
     };
 
     struct Package

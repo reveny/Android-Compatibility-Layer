@@ -132,6 +132,19 @@ static uint32_t StraightFromPremultiplied(uint32_t pixel)
     return (alpha << 24) | (red << 16) | (green << 8) | blue;
 }
 
+static uint32_t PremultipliedFromStraight(uint32_t pixel)
+{
+    uint32_t alpha = (pixel >> 24) & 0xFFu;
+    if (alpha == 255) return pixel;
+    if (alpha == 0) return 0;
+
+    uint32_t blue = ((pixel & 0xFFu) * alpha + 127u) / 255u;
+    uint32_t green = (((pixel >> 8) & 0xFFu) * alpha + 127u) / 255u;
+    uint32_t red = (((pixel >> 16) & 0xFFu) * alpha + 127u) / 255u;
+
+    return (alpha << 24) | (red << 16) | (green << 8) | blue;
+}
+
 static jint BitmapPixel(JNIEnv*, jclass, jlong handle, jint x, jint y)
 {
     BitmapHandle* bitmap = FrameworkJniBitmapFrom(handle);
@@ -140,7 +153,7 @@ static jint BitmapPixel(JNIEnv*, jclass, jlong handle, jint x, jint y)
     if (static_cast<uint32_t>(x) >= bitmap->surface.width || static_cast<uint32_t>(y) >= bitmap->surface.height) return 0;
 
     const uint8_t* row = bitmap->surface.pixels + static_cast<size_t>(y) * bitmap->surface.stride;
-    return static_cast<jint>(reinterpret_cast<const uint32_t*>(row)[x]);
+    return static_cast<jint>(StraightFromPremultiplied(reinterpret_cast<const uint32_t*>(row)[x]));
 }
 
 static void BitmapSetPixel(JNIEnv*, jclass, jlong handle, jint x, jint y, jint color)
@@ -151,7 +164,30 @@ static void BitmapSetPixel(JNIEnv*, jclass, jlong handle, jint x, jint y, jint c
     if (static_cast<uint32_t>(x) >= bitmap->surface.width || static_cast<uint32_t>(y) >= bitmap->surface.height) return;
 
     uint8_t* row = bitmap->surface.pixels + static_cast<size_t>(y) * bitmap->surface.stride;
-    reinterpret_cast<uint32_t*>(row)[x] = static_cast<uint32_t>(color);
+    reinterpret_cast<uint32_t*>(row)[x] = PremultipliedFromStraight(static_cast<uint32_t>(color));
+}
+
+static void BitmapWritePixels(JNIEnv* env, jclass, jlong handle, jintArray from, jint offset, jint stride, jint x, jint y,
+                              jint width, jint height)
+{
+    BitmapHandle* bitmap = FrameworkJniBitmapFrom(handle);
+    if (!bitmap || !bitmap->surface.pixels || !from) return;
+    if (x < 0 || y < 0 || width <= 0 || height <= 0) return;
+    if (static_cast<uint32_t>(x + width) > bitmap->surface.width) return;
+    if (static_cast<uint32_t>(y + height) > bitmap->surface.height) return;
+
+    std::vector<jint> row(static_cast<size_t>(width));
+
+    for (jint line = 0; line < height; ++line)
+    {
+        env->GetIntArrayRegion(from, offset + line * stride, width, row.data());
+        if (env->ExceptionCheck()) return;
+
+        uint8_t* destination = bitmap->surface.pixels + static_cast<size_t>(y + line) * bitmap->surface.stride;
+        uint32_t* pixels = reinterpret_cast<uint32_t*>(destination) + x;
+
+        for (jint column = 0; column < width; ++column) pixels[column] = PremultipliedFromStraight(static_cast<uint32_t>(row[column]));
+    }
 }
 
 static void BitmapReadPixels(JNIEnv* env, jclass, jlong handle, jintArray into, jint offset, jint stride, jint x, jint y,
@@ -226,6 +262,7 @@ static const JNINativeMethod BITMAP_METHODS[] = {
     {"nativePixel", "(JII)I", reinterpret_cast<void*>(&BitmapPixel)},
     {"nativeSetPixel", "(JIII)V", reinterpret_cast<void*>(&BitmapSetPixel)},
     {"nativeReadPixels", "(J[IIIIIII)V", reinterpret_cast<void*>(&BitmapReadPixels)},
+    {"nativeWritePixels", "(J[IIIIIII)V", reinterpret_cast<void*>(&BitmapWritePixels)},
     {"nativeErase", "(JI)V", reinterpret_cast<void*>(&BitmapErase)},
 };
 

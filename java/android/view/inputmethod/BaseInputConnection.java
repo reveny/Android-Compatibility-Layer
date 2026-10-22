@@ -37,6 +37,12 @@ public class BaseInputConnection implements InputConnection
         return null;
     }
 
+    @Override
+    public android.os.Handler getHandler()
+    {
+        return null;
+    }
+
     public static int getComposingSpanStart(android.text.Spannable text)
     {
         return -1;
@@ -241,6 +247,44 @@ public class BaseInputConnection implements InputConnection
     public boolean commitContent(InputContentInfo inputContentInfo, int flags, Bundle opts)
     {
         return false;
+    }
+
+    @Override
+    public SurroundingText getSurroundingText(int beforeLength, int afterLength, int flags)
+    {
+        if (beforeLength < 0) throw new IllegalArgumentException("beforeLength must be non-negative");
+        if (afterLength < 0) throw new IllegalArgumentException("afterLength must be non-negative");
+
+        int selectionStart = Math.max(0, Math.min(mSelectionStart, mText.length()));
+        int selectionEnd = Math.max(selectionStart, Math.min(mSelectionEnd, mText.length()));
+        int start = (int)Math.max(0, (long)selectionStart - beforeLength);
+        int end = (int)Math.min(mText.length(), (long)selectionEnd + afterLength);
+
+        return new SurroundingText(mText.substring(start, end), selectionStart - start, selectionEnd - start, start);
+    }
+
+    @Override
+    public TextSnapshot takeSnapshot()
+    {
+        SurroundingText surroundingText = getSurroundingText(2048, 2048, 0);
+        int compositionStart = mComposingStart >= 0 && mComposingEnd >= mComposingStart ? mComposingStart : -1;
+        int compositionEnd = compositionStart < 0 ? -1 : mComposingEnd;
+
+        return new TextSnapshot(surroundingText, compositionStart, compositionEnd, getCursorCapsMode(0));
+    }
+
+    @Override
+    public boolean replaceText(int start, int end, CharSequence text, int newCursorPosition, TextAttribute textAttribute)
+    {
+        if (start < 0) throw new IllegalArgumentException("start must be non-negative");
+        if (end < 0) throw new IllegalArgumentException("end must be non-negative");
+
+        beginBatchEdit();
+        finishComposingText();
+        setSelection(Math.min(start, end), Math.max(start, end));
+        commitText(text, newCursorPosition);
+        endBatchEdit();
+        return true;
     }
 
     private void replaceSelection(String text)

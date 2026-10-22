@@ -3,6 +3,7 @@ package android.util;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 import org.xmlpull.v1.XmlPullParserFactory;
+import org.xmlpull.v1.XmlSerializer;
 
 public class Xml
 {
@@ -26,7 +27,9 @@ public class Xml
         }
     }
 
-    private Xml()
+    public static String FEATURE_RELAXED = "http://xmlpull.org/v1/doc/features.html#relaxed";
+
+    Xml()
     {
     }
 
@@ -45,6 +48,26 @@ public class Xml
         }
     }
 
+    public static XmlSerializer newSerializer()
+    {
+        try
+        {
+            return (XmlSerializer)Class.forName("com.android.org.kxml2.io.KXmlSerializer").newInstance();
+        }
+        catch (ClassNotFoundException failure)
+        {
+            throw new AssertionError(failure);
+        }
+        catch (InstantiationException failure)
+        {
+            throw new AssertionError(failure);
+        }
+        catch (IllegalAccessException failure)
+        {
+            throw new AssertionError(failure);
+        }
+    }
+
     public static AttributeSet asAttributeSet(XmlPullParser parser)
     {
         if (parser instanceof AttributeSet) return (AttributeSet)parser;
@@ -52,23 +75,59 @@ public class Xml
         return new ParserAttributeSet(parser);
     }
 
-    public static String findEncodingByName(String name) throws UnsupportedEncodingException
+    public static Encoding findEncodingByName(String name) throws java.io.UnsupportedEncodingException
     {
-        if (name == null) return Encoding.UTF_8.expectedName();
+        if (name == null) return Encoding.UTF_8;
 
         for (Encoding encoding : Encoding.values())
         {
-            if (encoding.expectedName().equalsIgnoreCase(name)) return encoding.expectedName();
+            if (encoding.expectedName().equalsIgnoreCase(name)) return encoding;
         }
 
-        throw new UnsupportedEncodingException(name);
+        throw new java.io.UnsupportedEncodingException(name);
     }
 
-    public static class UnsupportedEncodingException extends java.io.UnsupportedEncodingException
+    public static void parse(String xml, org.xml.sax.ContentHandler contentHandler) throws org.xml.sax.SAXException
     {
-        public UnsupportedEncodingException(String name)
+        try
         {
-            super(name);
+            parse(new org.xml.sax.InputSource(new java.io.StringReader(xml)), contentHandler);
+        }
+        catch (java.io.IOException failure)
+        {
+            throw new AssertionError(failure);
+        }
+    }
+
+    public static void parse(java.io.Reader in, org.xml.sax.ContentHandler contentHandler) throws java.io.IOException,
+                                                                                               org.xml.sax.SAXException
+    {
+        parse(new org.xml.sax.InputSource(in), contentHandler);
+    }
+
+    public static void parse(java.io.InputStream in, Encoding encoding, org.xml.sax.ContentHandler contentHandler)
+        throws java.io.IOException, org.xml.sax.SAXException
+    {
+        org.xml.sax.InputSource source = new org.xml.sax.InputSource(in);
+        source.setEncoding(encoding == null ? Encoding.UTF_8.expectedName() : encoding.expectedName());
+        parse(source, contentHandler);
+    }
+
+    private static void parse(org.xml.sax.InputSource source, org.xml.sax.ContentHandler contentHandler)
+        throws java.io.IOException, org.xml.sax.SAXException
+    {
+        try
+        {
+            javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
+            factory.setNamespaceAware(true);
+
+            org.xml.sax.XMLReader reader = factory.newSAXParser().getXMLReader();
+            reader.setContentHandler(contentHandler);
+            reader.parse(source);
+        }
+        catch (javax.xml.parsers.ParserConfigurationException failure)
+        {
+            throw new org.xml.sax.SAXException(failure);
         }
     }
 

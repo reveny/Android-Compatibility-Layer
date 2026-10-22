@@ -51,6 +51,50 @@ public class SparseArray<E> implements Cloneable
         if (key != null) delete(key);
     }
 
+    public void removeAtRange(int index, int size)
+    {
+        int end = Math.min(size(), index + size);
+        ArrayList<Integer> keys = new ArrayList<>(sortedKeys());
+        for (int position = index; position < end; position++)
+        {
+            mEntries.remove(keys.get(position));
+        }
+        mSortedKeys = null;
+    }
+
+    public void set(int key, E value)
+    {
+        put(key, value);
+    }
+
+    public boolean contentEquals(SparseArray<?> other)
+    {
+        if (other == null) return false;
+
+        int size = size();
+        if (size != other.size()) return false;
+
+        for (int index = 0; index < size; index++)
+        {
+            if (keyAt(index) != other.keyAt(index) || !java.util.Objects.equals(valueAt(index), other.valueAt(index))) return false;
+        }
+        return true;
+    }
+
+    public int contentHashCode()
+    {
+        int hash = 0;
+        int size = size();
+        for (int index = 0; index < size; index++)
+        {
+            int key = keyAt(index);
+            E value = valueAt(index);
+            hash = 31 * hash + key;
+            hash = 31 * hash + java.util.Objects.hashCode(value);
+        }
+        return hash;
+    }
+
     public void clear()
     {
         mEntries.clear();

@@ -11,6 +11,11 @@ public class FrameLayout extends ViewGroup
 {
     private static final int DEFAULT_CHILD_GRAVITY = Gravity.TOP | Gravity.START;
 
+    private static StyleableSet sStyleable;
+
+    private boolean mMeasureAllChildren;
+    private final java.util.ArrayList<View> mMatchParentChildren = new java.util.ArrayList<>(1);
+
     public FrameLayout(Context context)
     {
         super(context);
@@ -19,28 +24,65 @@ public class FrameLayout extends ViewGroup
     public FrameLayout(Context context, AttributeSet attributes)
     {
         super(context, attributes);
+        readAttributes(context, attributes, 0, 0);
     }
 
     public FrameLayout(Context context, AttributeSet attributes, int defStyleAttr)
     {
         super(context, attributes, defStyleAttr);
+        readAttributes(context, attributes, defStyleAttr, 0);
     }
 
     public FrameLayout(Context context, AttributeSet attributes, int defStyleAttr, int defStyleRes)
     {
         super(context, attributes, defStyleAttr, defStyleRes);
+        readAttributes(context, attributes, defStyleAttr, defStyleRes);
     }
 
-    public void setForeground(android.graphics.drawable.Drawable foreground)
+    private void readAttributes(Context context, AttributeSet attributes, int defStyleAttr, int defStyleRes)
     {
+        if (attributes == null) return;
+
+        if (sStyleable == null) sStyleable = StyleableSet.of(context.getResources(), "measureAllChildren");
+        if (sStyleable.isEmpty()) return;
+
+        android.content.res.TypedArray array = context.obtainStyledAttributes(attributes, sStyleable.attributes(), defStyleAttr, defStyleRes);
+        mMeasureAllChildren = array.getBoolean(0, false);
+        array.recycle();
     }
 
+    @Override
     public void setForegroundGravity(int gravity)
     {
+        super.setForegroundGravity(gravity);
     }
 
     public void setMeasureAllChildren(boolean measureAll)
     {
+        mMeasureAllChildren = measureAll;
+    }
+
+    @Deprecated
+    public boolean getConsiderGoneChildrenWhenMeasuring()
+    {
+        return getMeasureAllChildren();
+    }
+
+    public boolean getMeasureAllChildren()
+    {
+        return mMeasureAllChildren;
+    }
+
+    @Override
+    public boolean shouldDelayChildPressedState()
+    {
+        return false;
+    }
+
+    @Override
+    public CharSequence getAccessibilityClassName()
+    {
+        return FrameLayout.class.getName();
     }
 
     @Override
@@ -72,25 +114,78 @@ public class FrameLayout extends ViewGroup
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec)
     {
+        boolean measureMatchParentChildren = MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.EXACTLY
+            || MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.EXACTLY;
+        mMatchParentChildren.clear();
+
         int widestChild = 0;
         int tallestChild = 0;
+        int childState = 0;
 
         for (int index = 0; index < getChildCount(); index++)
         {
             View child = getChildAt(index);
-            if (child.getVisibility() == GONE) continue;
+            if (!mMeasureAllChildren && child.getVisibility() == GONE) continue;
 
             measureChildWithMargins(child, widthMeasureSpec, 0, heightMeasureSpec, 0);
 
             LayoutParams params = paramsFor(child);
             widestChild = Math.max(widestChild, child.getMeasuredWidth() + params.leftMargin + params.rightMargin);
             tallestChild = Math.max(tallestChild, child.getMeasuredHeight() + params.topMargin + params.bottomMargin);
+            childState = combineMeasuredStates(childState, child.getMeasuredState());
+
+            if (measureMatchParentChildren && (params.width == LayoutParams.MATCH_PARENT || params.height == LayoutParams.MATCH_PARENT))
+            {
+                mMatchParentChildren.add(child);
+            }
         }
 
         widestChild = Math.max(widestChild + getPaddingLeft() + getPaddingRight(), getSuggestedMinimumWidth());
         tallestChild = Math.max(tallestChild + getPaddingTop() + getPaddingBottom(), getSuggestedMinimumHeight());
 
-        setMeasuredDimension(resolveSize(widestChild, widthMeasureSpec), resolveSize(tallestChild, heightMeasureSpec));
+        android.graphics.drawable.Drawable foreground = getForeground();
+        if (foreground != null)
+        {
+            widestChild = Math.max(widestChild, foreground.getMinimumWidth());
+            tallestChild = Math.max(tallestChild, foreground.getMinimumHeight());
+        }
+
+        setMeasuredDimension(resolveSizeAndState(widestChild, widthMeasureSpec, childState),
+                             resolveSizeAndState(tallestChild, heightMeasureSpec, childState << MEASURED_HEIGHT_STATE_SHIFT));
+
+        if (mMatchParentChildren.size() <= 1) return;
+
+        for (int index = 0; index < mMatchParentChildren.size(); index++)
+        {
+            View child = mMatchParentChildren.get(index);
+            LayoutParams params = paramsFor(child);
+
+            int childWidthMeasureSpec;
+            if (params.width == LayoutParams.MATCH_PARENT)
+            {
+                int width = Math.max(0, getMeasuredWidth() - getPaddingLeft() - getPaddingRight() - params.leftMargin - params.rightMargin);
+                childWidthMeasureSpec = MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY);
+            }
+            else
+            {
+                childWidthMeasureSpec = getChildMeasureSpec(widthMeasureSpec, getPaddingLeft() + getPaddingRight()
+                                                            + params.leftMargin + params.rightMargin, params.width);
+            }
+
+            int childHeightMeasureSpec;
+            if (params.height == LayoutParams.MATCH_PARENT)
+            {
+                int height = Math.max(0, getMeasuredHeight() - getPaddingTop() - getPaddingBottom() - params.topMargin - params.bottomMargin);
+                childHeightMeasureSpec = MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY);
+            }
+            else
+            {
+                childHeightMeasureSpec = getChildMeasureSpec(heightMeasureSpec, getPaddingTop() + getPaddingBottom()
+                                                             + params.topMargin + params.bottomMargin, params.height);
+            }
+
+            child.measure(childWidthMeasureSpec, childHeightMeasureSpec);
+        }
     }
 
     private LayoutParams paramsFor(View child)
@@ -205,6 +300,12 @@ public class FrameLayout extends ViewGroup
         public LayoutParams(ViewGroup.MarginLayoutParams source)
         {
             super(source);
+        }
+
+        public LayoutParams(LayoutParams source)
+        {
+            super(source);
+            this.gravity = source.gravity;
         }
     }
 

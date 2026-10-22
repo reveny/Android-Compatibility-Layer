@@ -49,6 +49,7 @@ file(MAKE_DIRECTORY "${ACL_DIST_DIR}/art/framework")
 acl_copy_file("${ACL_BINARY}" "${ACL_DIST_DIR}/bin")
 acl_copy_file("${ACL_GUEST_SHIM}" "${ACL_DIST_DIR}/bin")
 acl_copy_file("${ACL_FRAMEWORK_JAR}" "${ACL_DIST_DIR}/java")
+acl_copy_file("${ACL_APACHE_HTTP_JAR}" "${ACL_DIST_DIR}/java")
 
 file(GLOB FONT_FILES "${ACL_FONT_DIR}/*.ttf")
 if(NOT FONT_FILES)

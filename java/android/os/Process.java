@@ -94,6 +94,73 @@ public class Process
         return SystemClock.uptimeMillis();
     }
 
+    public static final int ROOT_UID = 0;
+    public static final int SYSTEM_UID = 1000;
+    public static final int PHONE_UID = 1001;
+    public static final int SHELL_UID = 2000;
+    public static final int BLUETOOTH_UID = 1002;
+    public static final int WIFI_UID = 1010;
+    public static final int LAST_APPLICATION_UID = 19999;
+
+    private static final long START_UPTIME_MILLIS = SystemClock.uptimeMillis();
+    private static final long START_ELAPSED_REALTIME = SystemClock.elapsedRealtime();
+
+    public static long getStartElapsedRealtime()
+    {
+        return START_ELAPSED_REALTIME;
+    }
+
+    public static long getStartUptimeMillis()
+    {
+        return START_UPTIME_MILLIS;
+    }
+
+    public static long getStartRequestedElapsedRealtime()
+    {
+        return START_ELAPSED_REALTIME;
+    }
+
+    public static long getStartRequestedUptimeMillis()
+    {
+        return START_UPTIME_MILLIS;
+    }
+
+    public static boolean isApplicationUid(int uid)
+    {
+        int appId = uid % 100000;
+        return appId >= FIRST_APPLICATION_UID && appId <= LAST_APPLICATION_UID;
+    }
+
+    public static final boolean isIsolated()
+    {
+        return false;
+    }
+
+    public static final boolean isSdkSandbox()
+    {
+        return false;
+    }
+
+    public static final int getUidForName(String name)
+    {
+        return -1;
+    }
+
+    public static final int getGidForName(String name)
+    {
+        return -1;
+    }
+
+    public static final int[] getExclusiveCores()
+    {
+        return new int[0];
+    }
+
+    public static final void setThreadPriority(int tid, int priority, boolean ignored)
+    {
+        setThreadPriority(tid, priority);
+    }
+
     private static native int nativeProcessId();
 
     private static native int nativeThreadId();

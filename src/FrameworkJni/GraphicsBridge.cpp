@@ -177,6 +177,11 @@ static Rasterizer::BlendMode BlendFrom(jint value)
         case 7: return Rasterizer::BlendMode::Screen;
         case 8: return Rasterizer::BlendMode::Plus;
         case 9: return Rasterizer::BlendMode::Clear;
+        case 10: return Rasterizer::BlendMode::DestinationIn;
+        case 11: return Rasterizer::BlendMode::DestinationAtop;
+        case 12: return Rasterizer::BlendMode::SourceOut;
+        case 13: return Rasterizer::BlendMode::Xor;
+        case 14: return Rasterizer::BlendMode::Destination;
         default: return Rasterizer::BlendMode::SourceOver;
     }
 }

@@ -63,6 +63,7 @@ namespace JniBridge
     void RemoveLibraryLoader(Instance& bridge);
     Result LoadGuestLibrary(Instance& bridge, const std::string& soname, uint32_t& moduleId);
     Result RegisterLoaderFunctions(Instance& bridge);
+    Result InstallRuntimeLoadHook(JNIEnv* env);
 
     Result GuestJavaVm(const Instance& bridge, GuestState::GuestAddress& address);
     Result GuestJniEnv(const Instance& bridge, GuestState::GuestAddress& address);

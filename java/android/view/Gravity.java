@@ -41,18 +41,18 @@ public class Gravity
     public static final int DISPLAY_CLIP_VERTICAL = 0x10000000;
     public static final int DISPLAY_CLIP_HORIZONTAL = 0x01000000;
 
-    private Gravity()
+    public Gravity()
     {
     }
 
     public static boolean isHorizontal(int gravity)
     {
-        return (gravity & HORIZONTAL_GRAVITY_MASK) != 0;
+        return gravity > 0 && (gravity & RELATIVE_HORIZONTAL_GRAVITY_MASK) != 0;
     }
 
     public static boolean isVertical(int gravity)
     {
-        return (gravity & VERTICAL_GRAVITY_MASK) != 0;
+        return gravity > 0 && (gravity & VERTICAL_GRAVITY_MASK) != 0;
     }
 
     public static int getAbsoluteGravity(int gravity, int layoutDirection)
@@ -69,8 +69,62 @@ public class Gravity
 
     public static void apply(int gravity, int width, int height, Rect container, Rect out)
     {
+        apply(gravity, width, height, container, 0, 0, out);
+    }
+
+    public static void apply(int gravity, int width, int height, Rect container, Rect out, int layoutDirection)
+    {
+        apply(getAbsoluteGravity(gravity, layoutDirection), width, height, container, 0, 0, out);
+    }
+
+    public static void apply(int gravity, int width, int height, Rect container, int xAdjust, int yAdjust, Rect out,
+                             int layoutDirection)
+    {
+        apply(getAbsoluteGravity(gravity, layoutDirection), width, height, container, xAdjust, yAdjust, out);
+    }
+
+    public static void apply(int gravity, int width, int height, Rect container, int xAdjust, int yAdjust, Rect out)
+    {
         applyHorizontal(gravity, width, container, out);
         applyVertical(gravity, height, container, out);
+
+        int horizontal = gravity & HORIZONTAL_GRAVITY_MASK;
+        int vertical = gravity & VERTICAL_GRAVITY_MASK;
+
+        if (horizontal != FILL_HORIZONTAL) out.offset(horizontal == RIGHT ? -xAdjust : xAdjust, 0);
+        if (vertical != FILL_VERTICAL) out.offset(0, vertical == BOTTOM ? -yAdjust : yAdjust);
+
+        if ((gravity & (AXIS_CLIP << AXIS_X_SHIFT)) != 0)
+        {
+            if (out.left < container.left) out.left = container.left;
+            if (out.right > container.right) out.right = container.right;
+        }
+
+        if ((gravity & (AXIS_CLIP << AXIS_Y_SHIFT)) != 0)
+        {
+            if (out.top < container.top) out.top = container.top;
+            if (out.bottom > container.bottom) out.bottom = container.bottom;
+        }
+    }
+
+    public static void applyDisplay(int gravity, Rect display, Rect inoutObject)
+    {
+        if ((gravity & DISPLAY_CLIP_VERTICAL) != 0)
+        {
+            if (inoutObject.top < display.top) inoutObject.top = display.top;
+            if (inoutObject.bottom > display.bottom) inoutObject.bottom = display.bottom;
+        }
+
+        if ((gravity & DISPLAY_CLIP_HORIZONTAL) != 0)
+        {
+            if (inoutObject.left < display.left) inoutObject.left = display.left;
+            if (inoutObject.right > display.right) inoutObject.right = display.right;
+        }
+    }
+
+    public static void applyDisplay(int gravity, Rect display, Rect inoutObject, int layoutDirection)
+    {
+        applyDisplay(getAbsoluteGravity(gravity, layoutDirection), display, inoutObject);
     }
 
     private static void applyHorizontal(int gravity, int width, Rect container, Rect out)

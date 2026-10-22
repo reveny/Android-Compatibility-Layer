@@ -212,6 +212,18 @@ public final class MessageQueue
         mPendingWake = false;
     }
 
+    boolean hasMessages(Handler handler, Runnable callback, Object token, boolean matchWhat, int what)
+    {
+        synchronized (this)
+        {
+            for (Message cursor = mMessages; cursor != null; cursor = cursor.next)
+            {
+                if (matches(cursor, handler, callback, token, matchWhat, what)) return true;
+            }
+            return false;
+        }
+    }
+
     void removeCallbacksAndMessages(Handler handler, Runnable callback, Object token)
     {
         remove(handler, callback, token, false, 0);

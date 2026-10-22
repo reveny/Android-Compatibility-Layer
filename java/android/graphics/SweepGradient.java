@@ -22,6 +22,16 @@ public class SweepGradient extends Shader
         this(centreX, centreY, new int[] {startColor, endColor}, null);
     }
 
+    public SweepGradient(float centreX, float centreY, long[] colors, float[] positions)
+    {
+        this(centreX, centreY, argbColors(colors), positions);
+    }
+
+    public SweepGradient(float centreX, float centreY, long startColor, long endColor)
+    {
+        this(centreX, centreY, new long[] {startColor, endColor}, null);
+    }
+
     @Override
     int kind()
     {

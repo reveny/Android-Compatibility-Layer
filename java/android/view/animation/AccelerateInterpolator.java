@@ -1,6 +1,9 @@
 package android.view.animation;
 
-public class AccelerateInterpolator implements Interpolator
+import android.content.Context;
+import android.util.AttributeSet;
+
+public class AccelerateInterpolator extends BaseInterpolator
 {
     private final float mFactor;
     private final double mDoubledFactor;
@@ -16,9 +19,9 @@ public class AccelerateInterpolator implements Interpolator
         mDoubledFactor = 2.0 * factor;
     }
 
-    public AccelerateInterpolator(android.content.Context context, android.util.AttributeSet attributes)
+    public AccelerateInterpolator(Context context, AttributeSet attributes)
     {
-        this(1.0f);
+        this(new AnimationAttributes(context, attributes).getFloat("factor", 1.0f));
     }
 
     @Override

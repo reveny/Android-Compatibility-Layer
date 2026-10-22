@@ -546,6 +546,24 @@ static AbiBridge::Result SensorAbsentHandler(void*, GuestState::Registers& regis
     return AbiBridge::Result::Ok;
 }
 
+static AbiBridge::Result InputQueueIdleHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result InputQueueEmptyHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t eventOut = registers.general[1];
+    uint64_t none = 0;
+
+    if (eventOut != 0 && !memory.Write(memory.context, (GuestState::GuestAddress)eventOut, &none, sizeof(none)))
+        return AbiBridge::Result::MalformedArguments;
+
+    registers.general[0] = (uint64_t)(int64_t)-1;
+    return AbiBridge::Result::Ok;
+}
+
 static AbiBridge::Result ConfigurationNewHandler(void* context, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
 {
     GuestRuntime::Instance* runtime = (GuestRuntime::Instance*)context;
@@ -651,6 +669,12 @@ NativeActivity::Result NativeActivity::RegisterWindowFunctions(GuestRuntime::Ins
         {"ANativeActivity_hideSoftInput", &ActivityHideSoftInputHandler, nullptr},
         {"ANativeWindow_fromSurface", &WindowFromSurfaceHandler, nullptr},
         {"ANativeWindow_getFormat", &WindowFormatHandler, nullptr},
+        {"AInputQueue_attachLooper", &InputQueueIdleHandler, nullptr},
+        {"AInputQueue_detachLooper", &InputQueueIdleHandler, nullptr},
+        {"AInputQueue_hasEvents", &InputQueueIdleHandler, nullptr},
+        {"AInputQueue_getEvent", &InputQueueEmptyHandler, nullptr},
+        {"AInputQueue_preDispatchEvent", &InputQueueIdleHandler, nullptr},
+        {"AInputQueue_finishEvent", &InputQueueIdleHandler, nullptr},
     };
 
     gLooperRuntime = &runtime;

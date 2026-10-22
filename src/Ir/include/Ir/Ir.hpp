@@ -312,6 +312,7 @@ namespace Ir
         GuestState::GuestAddress successorTaken = NO_SUCCESSOR;
         GuestState::GuestAddress successorFallthrough = NO_SUCCESSOR;
         bool endsWithIndirectBranch = false;
+        bool externalEntry = true;
     };
 
     struct Function

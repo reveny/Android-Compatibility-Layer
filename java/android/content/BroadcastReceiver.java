@@ -79,6 +79,39 @@ public abstract class BroadcastReceiver
         mResultExtras = extras;
     }
 
+    public final boolean isInitialStickyBroadcast()
+    {
+        return false;
+    }
+
+    public final void setOrderedHint(boolean isOrdered)
+    {
+    }
+
+    public final void setDebugUnregister(boolean debug)
+    {
+    }
+
+    public final boolean getDebugUnregister()
+    {
+        return false;
+    }
+
+    public String getSentFromPackage()
+    {
+        return null;
+    }
+
+    public int getSentFromUid()
+    {
+        return -1;
+    }
+
+    public android.os.IBinder peekService(Context myContext, Intent service)
+    {
+        return null;
+    }
+
     public static class PendingResult
     {
         private final BroadcastReceiver mOwner;
@@ -120,6 +153,31 @@ public abstract class BroadcastReceiver
         public final void abortBroadcast()
         {
             mOwner.abortBroadcast();
+        }
+
+        public final void clearAbortBroadcast()
+        {
+            mOwner.clearAbortBroadcast();
+        }
+
+        public final boolean getAbortBroadcast()
+        {
+            return mOwner.getAbortBroadcast();
+        }
+
+        public final void setResult(int code, String data, android.os.Bundle extras)
+        {
+            mOwner.setResult(code, data, extras);
+        }
+
+        public final void setResultExtras(android.os.Bundle extras)
+        {
+            mOwner.setResultExtras(extras);
+        }
+
+        public final android.os.Bundle getResultExtras(boolean makeMap)
+        {
+            return mOwner.getResultExtras(makeMap);
         }
     }
 }

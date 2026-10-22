@@ -7,13 +7,16 @@ import android.util.AttributeSet;
 
 import org.xmlpull.v1.XmlPullParser;
 
-public class InsetDrawable extends Drawable
+public class InsetDrawable extends DrawableWrapper
 {
-    private Drawable mInner;
     private int mLeft;
     private int mTop;
     private int mRight;
     private int mBottom;
+    private float mLeftFraction;
+    private float mTopFraction;
+    private float mRightFraction;
+    private float mBottomFraction;
 
     public InsetDrawable()
     {
@@ -24,41 +27,73 @@ public class InsetDrawable extends Drawable
         this(inner, inset, inset, inset, inset);
     }
 
+    public InsetDrawable(Drawable inner, float inset)
+    {
+        this(inner, inset, inset, inset, inset);
+    }
+
     public InsetDrawable(Drawable inner, int left, int top, int right, int bottom)
     {
-        mInner = inner;
+        super(inner);
         mLeft = left;
         mTop = top;
         mRight = right;
         mBottom = bottom;
     }
 
-    public Drawable getDrawable()
+    public InsetDrawable(Drawable inner, float left, float top, float right, float bottom)
     {
-        return mInner;
+        super(inner);
+        mLeftFraction = left;
+        mTopFraction = top;
+        mRightFraction = right;
+        mBottomFraction = bottom;
     }
 
-    public void setDrawable(Drawable inner)
+    private int left(Rect bounds)
     {
-        mInner = inner;
+        return mLeft + Math.round(bounds.width() * mLeftFraction);
+    }
+
+    private int top(Rect bounds)
+    {
+        return mTop + Math.round(bounds.height() * mTopFraction);
+    }
+
+    private int right(Rect bounds)
+    {
+        return mRight + Math.round(bounds.width() * mRightFraction);
+    }
+
+    private int bottom(Rect bounds)
+    {
+        return mBottom + Math.round(bounds.height() * mBottomFraction);
     }
 
     @Override
     public int getIntrinsicWidth()
     {
-        if (mInner == null) return -1;
+        Drawable inner = getDrawable();
+        if (inner == null) return -1;
 
-        int width = mInner.getIntrinsicWidth();
-        return width < 0 ? -1 : width + mLeft + mRight;
+        int width = inner.getIntrinsicWidth();
+        if (width < 0) return -1;
+
+        float fractions = mLeftFraction + mRightFraction;
+        return fractions >= 1f ? -1 : Math.round((width + mLeft + mRight) / (1f - fractions));
     }
 
     @Override
     public int getIntrinsicHeight()
     {
-        if (mInner == null) return -1;
+        Drawable inner = getDrawable();
+        if (inner == null) return -1;
 
-        int height = mInner.getIntrinsicHeight();
-        return height < 0 ? -1 : height + mTop + mBottom;
+        int height = inner.getIntrinsicHeight();
+        if (height < 0) return -1;
+
+        float fractions = mTopFraction + mBottomFraction;
+        return fractions >= 1f ? -1 : Math.round((height + mTop + mBottom) / (1f - fractions));
     }
 
     @Override
@@ -66,60 +101,117 @@ public class InsetDrawable extends Drawable
     {
         if (padding == null) return false;
 
-        padding.set(mLeft, mTop, mRight, mBottom);
-        return mLeft != 0 || mTop != 0 || mRight != 0 || mBottom != 0;
+        Rect bounds = getBounds();
+        Rect inner = new Rect();
+        boolean innerPadded = getDrawable() != null && getDrawable().getPadding(inner);
+
+        padding.set(left(bounds) + inner.left, top(bounds) + inner.top, right(bounds) + inner.right, bottom(bounds) + inner.bottom);
+        return innerPadded || padding.left != 0 || padding.top != 0 || padding.right != 0 || padding.bottom != 0;
     }
 
     @Override
-    public void inflate(Resources resources, XmlPullParser parser, AttributeSet attributes) throws java.io.IOException,
-        org.xmlpull.v1.XmlPullParserException
+    protected void onBoundsChange(Rect bounds)
     {
-        int all = Math.round(DrawableInflater.dimension(resources, attributes, "inset", 0));
+        Drawable inner = getDrawable();
+        if (inner == null) return;
+
+        inner.setBounds(bounds.left + left(bounds), bounds.top + top(bounds), bounds.right - right(bounds),
+                        bounds.bottom - bottom(bounds));
+    }
+
+    @Override
+    public void inflate(Resources resources, XmlPullParser parser, AttributeSet attributes, Resources.Theme theme)
+        throws java.io.IOException, org.xmlpull.v1.XmlPullParserException
+    {
+        boolean allFraction = DrawableInflater.isFraction(attributes, "inset");
+        int all = allFraction ? 0 : Math.round(DrawableInflater.dimension(resources, attributes, "inset", 0));
+        float allPart = allFraction ? DrawableInflater.fraction(attributes, "inset", 0) : 0;
 
         mLeft = Math.round(DrawableInflater.dimension(resources, attributes, "insetLeft", all));
         mTop = Math.round(DrawableInflater.dimension(resources, attributes, "insetTop", all));
         mRight = Math.round(DrawableInflater.dimension(resources, attributes, "insetRight", all));
         mBottom = Math.round(DrawableInflater.dimension(resources, attributes, "insetBottom", all));
+        mLeftFraction = side(attributes, "insetLeft", allPart);
+        mTopFraction = side(attributes, "insetTop", allPart);
+        mRightFraction = side(attributes, "insetRight", allPart);
+        mBottomFraction = side(attributes, "insetBottom", allPart);
 
-        int reference = DrawableInflater.reference(attributes, "drawable", 0);
-        if (reference != 0) mInner = resources.getDrawable(reference);
+        if (DrawableInflater.isFraction(attributes, "insetLeft")) mLeft = 0;
+        if (DrawableInflater.isFraction(attributes, "insetTop")) mTop = 0;
+        if (DrawableInflater.isFraction(attributes, "insetRight")) mRight = 0;
+        if (DrawableInflater.isFraction(attributes, "insetBottom")) mBottom = 0;
 
-        int outerDepth = parser.getDepth();
-        int event;
+        inflateChild(resources, parser, attributes, theme);
+    }
 
-        while ((event = parser.next()) != XmlPullParser.END_DOCUMENT)
-        {
-            if (event == XmlPullParser.END_TAG && parser.getDepth() <= outerDepth) break;
-            if (event != XmlPullParser.START_TAG) continue;
+    private static float side(AttributeSet attributes, String name, float fallback)
+    {
+        if (DrawableInflater.isFraction(attributes, name)) return DrawableInflater.fraction(attributes, name, fallback);
+        if (DrawableInflater.text(attributes, name) != null) return 0;
 
-            Drawable child = DrawableInflater.inflate(resources, parser, attributes);
-            if (child != null) mInner = child;
-        }
+        return fallback;
+    }
+
+    @Override
+    public void applyTheme(Resources.Theme theme)
+    {
+        super.applyTheme(theme);
+    }
+
+    @Override
+    public android.graphics.Insets getOpticalInsets()
+    {
+        android.graphics.Insets inner = super.getOpticalInsets();
+        Rect bounds = getBounds();
+
+        return android.graphics.Insets.of(inner.left + left(bounds), inner.top + top(bounds), inner.right + right(bounds),
+                                          inner.bottom + bottom(bounds));
+    }
+
+    @Override
+    public int getOpacity()
+    {
+        Drawable inner = getDrawable();
+        if (inner == null) return android.graphics.PixelFormat.TRANSPARENT;
+
+        int opacity = inner.getOpacity();
+        Rect bounds = getBounds();
+        boolean inset = left(bounds) > 0 || top(bounds) > 0 || right(bounds) > 0 || bottom(bounds) > 0;
+
+        if (opacity == android.graphics.PixelFormat.OPAQUE && inset) return android.graphics.PixelFormat.TRANSLUCENT;
+
+        return opacity;
+    }
+
+    @Override
+    public void getOutline(android.graphics.Outline outline)
+    {
+        super.getOutline(outline);
+    }
+
+    @Override
+    DrawableWrapper copyWrapper()
+    {
+        InsetDrawable copy = new InsetDrawable();
+        copy.mLeft = mLeft;
+        copy.mTop = mTop;
+        copy.mRight = mRight;
+        copy.mBottom = mBottom;
+        copy.mLeftFraction = mLeftFraction;
+        copy.mTopFraction = mTopFraction;
+        copy.mRightFraction = mRightFraction;
+        copy.mBottomFraction = mBottomFraction;
+        return copy;
     }
 
     @Override
     public void draw(Canvas canvas)
     {
-        if (mInner == null) return;
+        Drawable inner = getDrawable();
+        if (inner == null) return;
 
-        Rect bounds = getBounds();
-        mInner.setBounds(bounds.left + mLeft, bounds.top + mTop, bounds.right - mRight, bounds.bottom - mBottom);
-        mInner.setAlpha(getAlpha());
-        mInner.draw(canvas);
-    }
-
-    @Override
-    public boolean isStateful()
-    {
-        return mInner != null && mInner.isStateful();
-    }
-
-    @Override
-    public boolean setState(int[] stateSet)
-    {
-        boolean changed = super.setState(stateSet);
-        if (mInner != null && mInner.setState(stateSet)) changed = true;
-
-        return changed;
+        onBoundsChange(getBounds());
+        inner.setAlpha(getAlpha());
+        inner.draw(canvas);
     }
 }

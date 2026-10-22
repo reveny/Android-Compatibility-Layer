@@ -6,8 +6,22 @@ public interface Spannable extends Spanned
 
     void removeSpan(Object what);
 
-    interface Factory
+    class Factory
     {
-        Spannable newSpannable(CharSequence source);
+        private static final Factory INSTANCE = new Factory();
+
+        public Factory()
+        {
+        }
+
+        public static Factory getInstance()
+        {
+            return INSTANCE;
+        }
+
+        public Spannable newSpannable(CharSequence source)
+        {
+            return new SpannableString(source);
+        }
     }
 }

@@ -30,12 +30,13 @@ add_custom_target(dist
             -DACL_BINARY=$<TARGET_FILE:acl>
             -DACL_GUEST_SHIM=$<TARGET_FILE:aclguest>
             -DACL_FRAMEWORK_JAR=${CMAKE_BINARY_DIR}/java/framework.jar
+            -DACL_APACHE_HTTP_JAR=${CMAKE_BINARY_DIR}/java/org.apache.http.legacy.jar
             -DACL_FRAMEWORK_RES=${ACL_DIST_FRAMEWORK_RES}
             -DACL_HOST_ROOT=${ACL_DIST_HOST_ROOT}
             -DACL_FONT_DIR=${RUNTIME_FONT_DIR}
             -DACL_LINKER=${ACL_DIST_LINKER}
             -P ${CMAKE_SOURCE_DIR}/tools/assemble-dist.cmake
-    DEPENDS acl aclguest FrameworkJar
+    DEPENDS acl aclguest FrameworkJar ApacheHttpJar
     COMMENT "Assembling ${ACL_DIST_NAME}"
     VERBATIM
 )

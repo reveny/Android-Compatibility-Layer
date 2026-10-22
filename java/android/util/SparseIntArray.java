@@ -73,6 +73,22 @@ public class SparseIntArray implements Cloneable
         return sortedKeys().indexOf(key);
     }
 
+    public int indexOfValue(int value)
+    {
+        ArrayList<Integer> keys = sortedKeys();
+        for (int index = 0; index < keys.size(); index++)
+        {
+            if (mEntries.get(keys.get(index)) == value) return index;
+        }
+        return -1;
+    }
+
+    public void setValueAt(int index, int value)
+    {
+        Integer key = keyAtOrNull(index);
+        if (key != null) mEntries.put(key, value);
+    }
+
     public void append(int key, int value)
     {
         put(key, value);

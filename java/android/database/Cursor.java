@@ -112,4 +112,25 @@ public interface Cursor extends java.io.Closeable
     default void deactivate()
     {
     }
+
+    default void setNotificationUris(android.content.ContentResolver resolver, java.util.List<android.net.Uri> uris)
+    {
+        if (uris != null && !uris.isEmpty()) setNotificationUri(resolver, uris.get(0));
+    }
+
+    default java.util.List<android.net.Uri> getNotificationUris()
+    {
+        android.net.Uri uri = getNotificationUri();
+        return uri == null ? null : java.util.Collections.singletonList(uri);
+    }
+
+    default boolean getWantsAllOnMoveCalls()
+    {
+        return false;
+    }
+
+    default void copyStringToBuffer(int columnIndex, CharArrayBuffer buffer)
+    {
+        if (buffer != null) buffer.copyFrom(getString(columnIndex));
+    }
 }

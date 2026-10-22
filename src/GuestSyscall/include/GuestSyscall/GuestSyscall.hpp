@@ -22,6 +22,17 @@ namespace GuestSyscall
     inline constexpr uint32_t SYSCALL_SCHED_SET_AFFINITY = 122;
     inline constexpr uint32_t SYSCALL_PROTECT_MEMORY = 226;
     inline constexpr uint32_t SYSCALL_RESERVED_TIMER = 115;
+    inline constexpr uint32_t SYSCALL_TRUNCATE_DESCRIPTOR = 46;
+    inline constexpr uint32_t SYSCALL_ALLOCATE_FILE_SPACE = 47;
+    inline constexpr uint32_t SYSCALL_SYNCHRONIZE_DESCRIPTOR = 82;
+    inline constexpr uint32_t SYSCALL_SYNCHRONIZE_DESCRIPTOR_DATA = 83;
+    inline constexpr uint32_t SYSCALL_GET_CPU = 168;
+    inline constexpr uint32_t SYSCALL_GET_PARENT_PROCESS_ID = 173;
+    inline constexpr uint32_t SYSCALL_GET_EFFECTIVE_USER_ID = 175;
+    inline constexpr uint32_t SYSCALL_GET_GROUP_ID = 176;
+    inline constexpr uint32_t SYSCALL_GET_EFFECTIVE_GROUP_ID = 177;
+    inline constexpr uint32_t SYSCALL_READ_OTHER_PROCESS = 270;
+    inline constexpr uint32_t SYSCALL_WRITE_OTHER_PROCESS = 271;
 
     enum class Result : uint8_t
     {

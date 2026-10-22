@@ -3,7 +3,9 @@ package android.provider;
 import android.content.ContentResolver;
 import android.net.Uri;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public final class Settings
@@ -16,6 +18,11 @@ public final class Settings
     {
     }
 
+    public static boolean canDrawOverlays(android.content.Context context)
+    {
+        return context != null && runtime.Permissions.isDeclared("android.permission.SYSTEM_ALERT_WINDOW");
+    }
+
     public static class SettingNotFoundException extends android.util.AndroidException
     {
         public SettingNotFoundException(String message)
@@ -24,14 +31,55 @@ public final class Settings
         }
     }
 
+    public static class NameValueTable implements BaseColumns
+    {
+        public static final String NAME = "name";
+        public static final String VALUE = "value";
+
+        public NameValueTable()
+        {
+        }
+
+        protected static boolean putString(ContentResolver resolver, Uri uri, String name, String value)
+        {
+            Table table = Table.forUri(uri);
+            return table != null && table.write(name, value);
+        }
+
+        public static Uri getUriFor(Uri uri, String name)
+        {
+            return Uri.withAppendedPath(uri, name);
+        }
+    }
+
     private static final class Table
     {
+        private static final List<Table> ALL = new ArrayList<>();
+
         private final Uri contentUri;
         private final Map<String, String> values = new HashMap<>();
 
         Table(String authorityPath)
         {
             contentUri = Uri.parse("content://settings/" + authorityPath);
+
+            synchronized (ALL)
+            {
+                ALL.add(this);
+            }
+        }
+
+        static Table forUri(Uri uri)
+        {
+            synchronized (ALL)
+            {
+                for (Table table : ALL)
+                {
+                    if (table.contentUri.equals(uri)) return table;
+                }
+            }
+
+            return null;
         }
 
         synchronized String get(String name)
@@ -124,7 +172,7 @@ public final class Settings
         }
     }
 
-    public static final class System
+    public static final class System extends NameValueTable
     {
         public static final String ACCELEROMETER_ROTATION = "accelerometer_rotation";
         public static final String USER_ROTATION = "user_rotation";
@@ -138,6 +186,9 @@ public final class Settings
         public static final String DATE_FORMAT = "date_format";
         public static final String FONT_SCALE = "font_scale";
         public static final String VIBRATE_ON = "vibrate_on";
+        public static final String RINGTONE = "ringtone";
+        public static final String NOTIFICATION_SOUND = "notification_sound";
+        public static final String ALARM_ALERT = "alarm_alert";
 
         public static final int SCREEN_BRIGHTNESS_MODE_MANUAL = 0;
         public static final int SCREEN_BRIGHTNESS_MODE_AUTOMATIC = 1;
@@ -145,6 +196,9 @@ public final class Settings
         private static final Table TABLE = new Table("system");
 
         public static final Uri CONTENT_URI = TABLE.contentUri;
+        public static final Uri DEFAULT_RINGTONE_URI = TABLE.uriFor(RINGTONE);
+        public static final Uri DEFAULT_NOTIFICATION_URI = TABLE.uriFor(NOTIFICATION_SOUND);
+        public static final Uri DEFAULT_ALARM_ALERT_URI = TABLE.uriFor(ALARM_ALERT);
 
         static
         {
@@ -250,7 +304,7 @@ public final class Settings
         }
     }
 
-    public static final class Secure
+    public static final class Secure extends NameValueTable
     {
         public static final String ANDROID_ID = "android_id";
         public static final String ACCESSIBILITY_ENABLED = "accessibility_enabled";
@@ -339,7 +393,7 @@ public final class Settings
         }
     }
 
-    public static final class Global
+    public static final class Global extends NameValueTable
     {
         public static final String AIRPLANE_MODE_ON = "airplane_mode_on";
         public static final String ANIMATOR_DURATION_SCALE = "animator_duration_scale";

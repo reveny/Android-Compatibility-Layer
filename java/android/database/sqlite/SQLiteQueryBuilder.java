@@ -117,7 +117,7 @@ public class SQLiteQueryBuilder
 
         String sql = buildQuery(projection, selection, groupBy, having, sortOrder, limit);
 
-        return database.rawQuery(sql, selectionArgs);
+        return database.rawQueryWithFactory(mFactory, sql, selectionArgs, SQLiteDatabase.findEditTable(mTables), cancellationSignal);
     }
 
     public String buildQuery(String[] projection, String selection, String groupBy, String having, String sortOrder,

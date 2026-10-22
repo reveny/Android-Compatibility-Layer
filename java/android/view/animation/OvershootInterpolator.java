@@ -1,6 +1,9 @@
 package android.view.animation;
 
-public class OvershootInterpolator implements Interpolator
+import android.content.Context;
+import android.util.AttributeSet;
+
+public class OvershootInterpolator extends BaseInterpolator
 {
     private final float mTension;
 
@@ -14,9 +17,9 @@ public class OvershootInterpolator implements Interpolator
         mTension = tension;
     }
 
-    public OvershootInterpolator(android.content.Context context, android.util.AttributeSet attributes)
+    public OvershootInterpolator(Context context, AttributeSet attributes)
     {
-        this(2.0f);
+        this(new AnimationAttributes(context, attributes).getFloat("tension", 2.0f));
     }
 
     @Override

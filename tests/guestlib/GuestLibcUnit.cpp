@@ -174,6 +174,87 @@ static void ExpectRejected(const char* format, GuestLibc::Result expected, const
     failures += 1;
 }
 
+static constexpr int32_t GUEST_OPEN_DIRECTORY = 0x4000;
+static constexpr int32_t GUEST_OPEN_NO_FOLLOW = 0x8000;
+static constexpr int32_t GUEST_CLASS_NOT_A_NUMBER = 0x02;
+static constexpr int32_t GUEST_CLASS_ZERO = 0x10;
+
+struct GuestPollEvent
+{
+    uint32_t events;
+    uint32_t padding;
+    uint64_t data;
+};
+
+static void CheckOpenFlags()
+{
+    int32_t guest = GUEST_OPEN_DIRECTORY | GUEST_OPEN_NO_FOLLOW | O_RDONLY | O_CLOEXEC;
+    int32_t host = HostBridge::TranslateOpenFlagsToHost(guest);
+
+    Expect((host & O_DIRECTORY) != 0, "the guest's O_DIRECTORY reaches the host as O_DIRECTORY");
+    Expect((host & O_NOFOLLOW) != 0, "the guest's O_NOFOLLOW reaches the host as O_NOFOLLOW");
+    Expect((host & O_DIRECT) == 0, "the guest's O_DIRECTORY is not mistaken for the host's O_DIRECT");
+    Expect((host & O_CLOEXEC) != 0, "flags both ABIs share pass through unchanged");
+    Expect(HostBridge::TranslateOpenFlagsToGuest(host) == guest, "flags read back by F_GETFL use the guest's numbering");
+
+    char directoryTemplate[] = "/tmp/acl-flags-XXXXXX";
+    const char* base = mkdtemp(directoryTemplate);
+    if (!base)
+    {
+        printf("FAIL the open flag check needs a work directory\n");
+        failures += 1;
+        return;
+    }
+
+    int descriptor = HostBridge::OpenFile(base, GUEST_OPEN_DIRECTORY | O_RDONLY, 0);
+    Expect(descriptor >= 0, "a guest can open a directory with its own O_DIRECTORY value");
+    if (descriptor >= 0) close(descriptor);
+
+    rmdir(base);
+}
+
+static void CheckEventPoll()
+{
+    int poll = HostBridge::CreateEventPoll(O_CLOEXEC);
+    int event = HostBridge::CreateEventDescriptor(1, 0);
+
+    Expect(poll >= 0 && event >= 0, "an event poll and an event descriptor can be created");
+    if (poll < 0 || event < 0) return;
+
+    GuestPollEvent wanted{};
+    wanted.events = 0x001;
+    wanted.data = 0x1122334455667788ull;
+
+    Expect(HostBridge::ControlEventPoll(poll, 1, event, &wanted) == 0, "a descriptor is added with the guest's event layout");
+
+    GuestPollEvent delivered[2]{};
+    int produced = HostBridge::WaitEventPoll(poll, delivered, 2, 0);
+
+    Expect(produced == 1, "the ready descriptor is reported once");
+    Expect(delivered[0].data == wanted.data, "the user data comes back at the guest's 8 byte offset, not the host's packed one");
+
+    close(event);
+    close(poll);
+}
+
+static void CheckSystemDescription()
+{
+    char described[6 * 65] = {};
+    Expect(HostBridge::DescribeSystem(described) == 0, "uname succeeds");
+    Expect(strcmp(described + 4 * 65, "aarch64") == 0, "uname reports the guest's machine, not the host's");
+
+    char name[64] = {};
+    Expect(HostBridge::HostName(name, sizeof(name)) == 0 && strcmp(name, "localhost") == 0, "the host name does not leak the host's");
+    Expect(HostBridge::HostName(name, 4) != 0, "a host name buffer that is too small is refused");
+}
+
+static void CheckClassification()
+{
+    Expect(HostBridge::ClassifyDouble(0.0) == GUEST_CLASS_ZERO, "zero classifies with bionic's FP_ZERO value");
+    Expect(HostBridge::ClassifyNarrow(__builtin_nanf("")) == GUEST_CLASS_NOT_A_NUMBER, "NaN classifies with bionic's FP_NAN value");
+    Expect(HostBridge::IsInfinite(-__builtin_inf()) == -1, "negative infinity reports its sign");
+}
+
 int main()
 {
     ExpectPlan("", 0, 0, 0, "an empty format takes no arguments");
@@ -216,6 +297,10 @@ int main()
 
     CheckDeviceIdentity();
     CheckAndroidTree();
+    CheckOpenFlags();
+    CheckEventPoll();
+    CheckSystemDescription();
+    CheckClassification();
 
     printf("%s: %d checks failed\n", failures == 0 ? "guestlibc-unit PASSED" : "guestlibc-unit FAILED", failures);
     return failures == 0 ? 0 : 1;

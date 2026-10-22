@@ -17,7 +17,26 @@ public class ViewConfiguration
     private static final int HOVER_TAP_TIMEOUT = 150;
     private static final int SCROLL_FRICTION_HUNDREDTHS = 15;
 
+    private static final int FADING_EDGE_LENGTH = 12;
+    private static final int EDGE_SLOP = 12;
+    private static final int WINDOW_TOUCH_SLOP = 16;
+    private static final int HANDWRITING_SLOP = 2;
+    private static final int HANDWRITING_GESTURE_LINE_MARGIN = 16;
+    private static final int MAXIMUM_DRAWING_CACHE_SIZE = 480 * 800 * 4;
+    private static final int MULTI_PRESS_TIMEOUT = 300;
+    private static final long ZOOM_CONTROLS_TIMEOUT = 3000;
+    private static final long GLOBAL_ACTIONS_KEY_TIMEOUT = 500;
+    private static final float AMBIGUOUS_GESTURE_MULTIPLIER = 2.0f;
+    private static final int AXIS_SCROLL = 26;
+    private static final int NO_FLING_MINIMUM_VELOCITY = Integer.MAX_VALUE;
+    private static final int NO_FLING_MAXIMUM_VELOCITY = Integer.MIN_VALUE;
+
     private final float mDensity;
+
+    public ViewConfiguration()
+    {
+        mDensity = 1.0f;
+    }
 
     private ViewConfiguration(Context context)
     {
@@ -179,6 +198,108 @@ public class ViewConfiguration
     public boolean shouldShowMenuShortcutsWhenKeyboardPresent()
     {
         return false;
+    }
+
+    public static int getScrollBarSize()
+    {
+        return SCROLL_BAR_SIZE;
+    }
+
+    public static int getFadingEdgeLength()
+    {
+        return FADING_EDGE_LENGTH;
+    }
+
+    public int getScaledFadingEdgeLength()
+    {
+        return scaled(FADING_EDGE_LENGTH);
+    }
+
+    public static int getMultiPressTimeout()
+    {
+        return MULTI_PRESS_TIMEOUT;
+    }
+
+    public static int getEdgeSlop()
+    {
+        return EDGE_SLOP;
+    }
+
+    public static int getTouchSlop()
+    {
+        return TOUCH_SLOP;
+    }
+
+    public int getScaledHandwritingSlop()
+    {
+        return scaled(HANDWRITING_SLOP);
+    }
+
+    public int getScaledHandwritingGestureLineMargin()
+    {
+        return scaled(HANDWRITING_GESTURE_LINE_MARGIN);
+    }
+
+    public static int getWindowTouchSlop()
+    {
+        return WINDOW_TOUCH_SLOP;
+    }
+
+    public static int getMinimumFlingVelocity()
+    {
+        return MINIMUM_FLING_VELOCITY;
+    }
+
+    public static int getMaximumFlingVelocity()
+    {
+        return MAXIMUM_FLING_VELOCITY;
+    }
+
+    public static int getMaximumDrawingCacheSize()
+    {
+        return MAXIMUM_DRAWING_CACHE_SIZE;
+    }
+
+    public int getScaledMaximumDrawingCacheSize()
+    {
+        return MAXIMUM_DRAWING_CACHE_SIZE;
+    }
+
+    public static long getZoomControlsTimeout()
+    {
+        return ZOOM_CONTROLS_TIMEOUT;
+    }
+
+    public static long getGlobalActionKeyTimeout()
+    {
+        return GLOBAL_ACTIONS_KEY_TIMEOUT;
+    }
+
+    public static float getAmbiguousGestureMultiplier()
+    {
+        return AMBIGUOUS_GESTURE_MULTIPLIER;
+    }
+
+    public float getScaledAmbiguousGestureMultiplier()
+    {
+        return AMBIGUOUS_GESTURE_MULTIPLIER;
+    }
+
+    public int getScaledMinimumFlingVelocity(int inputDeviceId, int axis, int source)
+    {
+        if (!isFlingSupported(axis)) return NO_FLING_MINIMUM_VELOCITY;
+        return getScaledMinimumFlingVelocity();
+    }
+
+    public int getScaledMaximumFlingVelocity(int inputDeviceId, int axis, int source)
+    {
+        if (!isFlingSupported(axis)) return NO_FLING_MAXIMUM_VELOCITY;
+        return getScaledMaximumFlingVelocity();
+    }
+
+    private static boolean isFlingSupported(int axis)
+    {
+        return axis == MotionEvent.AXIS_X || axis == MotionEvent.AXIS_Y || axis == AXIS_SCROLL;
     }
 
     private int scaled(int value)

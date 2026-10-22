@@ -80,6 +80,13 @@ public final class Bootstrap
 
         info.dataDir = dataDir;
         info.nativeLibraryDir = nativeLibraryDir;
+        info.nativeLibraryRootDir = nativeLibraryDir == null ? null : new java.io.File(nativeLibraryDir).getParent();
+        info.nativeLibraryRootRequiresIsa = true;
+        info.primaryCpuAbi = "arm64-v8a";
+        info.credentialProtectedDataDir = dataDir;
+        info.scanSourceDir = info.sourceDir;
+        info.scanPublicSourceDir = info.publicSourceDir;
+        info.seInfo = "default:targetSdkVersion=" + nativeTargetSdkVersion();
         info.minSdkVersion = nativeMinSdkVersion();
         info.targetSdkVersion = nativeTargetSdkVersion();
         if (nativeDebuggable()) info.flags |= ApplicationInfo.FLAG_DEBUGGABLE;
@@ -98,9 +105,12 @@ public final class Bootstrap
 
         Permissions.initialize(dataDir);
 
+        android.security.keystore.AndroidKeyStoreProvider.install(dataRoot);
+
         PackageManager packageManager = new PackageManager(info);
         Resources resources = new Resources(nativeAssetsHandle());
-        ContextImpl base = new ContextImpl(info, packageManager, resources, loader, dataDir);
+        info.metaData = MetaData.read(resources, MetaData.APPLICATION, 0);
+        if (info.metaData != null) Log.i(TAG, "application meta-data: " + info.metaData.size() + " entries");
 
         AppComponentFactory factory;
         try
@@ -113,6 +123,25 @@ public final class Bootstrap
             Log.e(TAG, "could not instantiate AppComponentFactory " + info.appComponentFactory, cause);
             return FACTORY_FAILED;
         }
+
+        try
+        {
+            ClassLoader chosen = factory.instantiateClassLoader(loader, info);
+            if (chosen != null && chosen != loader)
+            {
+                Log.i(TAG, "the component factory supplied the class loader " + chosen.getClass().getName());
+                loader = chosen;
+            }
+        }
+        catch (Throwable cause)
+        {
+            Log.e(TAG, "the component factory could not supply a class loader, so the default one is kept", cause);
+        }
+
+        Thread.currentThread().setContextClassLoader(loader);
+
+        ContextImpl base = new ContextImpl(info, packageManager, resources, loader, dataDir);
+        android.app.ActivityThread.attachRuntime(base);
 
         Application application;
         try
@@ -139,12 +168,28 @@ public final class Bootstrap
         ProviderInfo[] providers = new ProviderInfo[providerCount];
         for (int index = 0; index < providerCount; index++)
         {
-            providers[index] = readProviderInfo(info, index);
+            providers[index] = readProviderInfo(info, resources, index);
             packageManager.addProvider(providers[index]);
         }
 
         for (ProviderInfo provider : providers)
         {
+            int setting = packageManager.getComponentEnabledSetting(new android.content.ComponentName(provider.packageName, provider.name));
+            boolean enabled = setting == PackageManager.COMPONENT_ENABLED_STATE_ENABLED ||
+                              (setting == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT && provider.enabled);
+
+            if (!enabled)
+            {
+                Log.i(TAG, "provider skipped, it is disabled: " + provider.name);
+                continue;
+            }
+
+            if (!runsInThisProcess(info, provider))
+            {
+                Log.i(TAG, "provider skipped, it runs in process " + provider.processName + ": " + provider.name);
+                continue;
+            }
+
             try
             {
                 ContentProvider instance = factory.instantiateProvider(loader, provider.name);
@@ -208,7 +253,7 @@ public final class Bootstrap
         }
 
         int theme = nativeActivityTheme(className);
-        int densityDpi = intProperty("RUNTIME_DENSITY_DPI", android.util.DisplayMetrics.DENSITY_DEFAULT);
+        int densityDpi = intProperty(android.view.WindowManagerImpl.DENSITY_SETTING, android.util.DisplayMetrics.DENSITY_DEFAULT);
         base.updateMetricsForWindow(width, height, densityDpi);
         Configurations.attach(base);
 
@@ -223,15 +268,13 @@ public final class Bootstrap
         activityInfo.applicationInfo = base.getApplicationInfo();
         activityInfo.theme = theme;
 
-        int metaDataCount = nativeActivityMetaDataCount(className);
-        if (metaDataCount > 0)
+        int activityCount = nativeComponentCount(MetaData.ACTIVITY);
+        for (int index = 0; index < activityCount; index++)
         {
-            Bundle metaData = new Bundle();
-            for (int entry = 0; entry < metaDataCount; entry++)
-            {
-                metaData.putString(nativeActivityMetaDataName(className, entry), nativeActivityMetaDataValue(className, entry));
-            }
-            activityInfo.metaData = metaData;
+            if (!className.equals(nativeComponentClassName(MetaData.ACTIVITY, index))) continue;
+
+            activityInfo.metaData = MetaData.read(base.getResources(), MetaData.ACTIVITY, index);
+            break;
         }
 
         base.getPackageManager().addActivity(activityInfo);
@@ -277,7 +320,11 @@ public final class Bootstrap
             instrumentation.callActivityOnPostCreate(activity, restored);
             if (restored != null) instrumentation.callActivityOnRestoreInstanceState(activity, restored);
 
-            if (Activities.current() != activity)
+            if (activity.isFinishing())
+            {
+                Log.i(TAG, activity.getClass().getName() + " finished while it was being created, so it is never shown");
+            }
+            else if (Activities.current() != activity)
             {
                 Log.i(TAG, activity.getClass().getName() + " started " + Activities.current().getClass().getName()
                                + " while it was being created, so it stays behind it until that one finishes");
@@ -371,15 +418,17 @@ public final class Bootstrap
                         || action == android.view.MotionEvent.ACTION_SCROLL)
                     {
                         Activity hoverTarget = Activities.current();
-                        (hoverTarget != null ? hoverTarget : inputTarget).dispatchGenericMotionEvent(event);
+                        windowCallbackOf(hoverTarget != null ? hoverTarget : inputTarget).dispatchGenericMotionEvent(event);
                         return;
                     }
+
+                    if (root.dispatchPanelTouch(event)) return;
 
                     Activity touchTarget = Activities.current();
                     if (touchTarget == null) touchTarget = inputTarget;
 
                     if (action == android.view.MotionEvent.ACTION_DOWN) describeInputState(touchTarget);
-                    touchTarget.dispatchTouchEvent(event);
+                    windowCallbackOf(touchTarget).dispatchTouchEvent(event);
                 }
                 catch (Throwable cause)
                 {
@@ -396,7 +445,8 @@ public final class Bootstrap
                     if (target == null) target = inputTarget;
 
                     if (android.view.inputmethod.InputMethodManager.getInstance().dispatchKeyEvent(event)) return;
-                    if (target.dispatchKeyEvent(event)) return;
+                    if (root.dispatchPanelKey(event)) return;
+                    if (windowCallbackOf(target).dispatchKeyEvent(event)) return;
 
                     if (event.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) return;
                     if (event.getAction() != android.view.KeyEvent.ACTION_UP) return;
@@ -570,6 +620,14 @@ public final class Bootstrap
         return finished ? OK : NO_FRAMES;
     }
 
+    private static android.view.Window.Callback windowCallbackOf(Activity activity)
+    {
+        android.view.Window window = activity.getWindow();
+        android.view.Window.Callback callback = window == null ? null : window.getCallback();
+
+        return callback != null ? callback : activity;
+    }
+
     private static int intProperty(String name, int fallback)
     {
         String value = Settings.get(name);
@@ -595,27 +653,33 @@ public final class Bootstrap
         return (AppComponentFactory)loader.loadClass(className).getDeclaredConstructor().newInstance();
     }
 
-    private static ProviderInfo readProviderInfo(ApplicationInfo applicationInfo, int index)
+    private static String processNameFor(ApplicationInfo applicationInfo, String declared)
+    {
+        String main = applicationInfo.processName != null ? applicationInfo.processName : applicationInfo.packageName;
+        if (declared == null || declared.isEmpty()) return main;
+        if (declared.startsWith(":")) return applicationInfo.packageName + declared;
+        return declared;
+    }
+
+    private static boolean runsInThisProcess(ApplicationInfo applicationInfo, ProviderInfo provider)
+    {
+        String main = applicationInfo.processName != null ? applicationInfo.processName : applicationInfo.packageName;
+        return provider.processName == null || provider.processName.equals(main);
+    }
+
+    private static ProviderInfo readProviderInfo(ApplicationInfo applicationInfo, Resources resources, int index)
     {
         ProviderInfo provider = new ProviderInfo();
         provider.applicationInfo = applicationInfo;
         provider.packageName = applicationInfo.packageName;
-        provider.processName = applicationInfo.packageName;
+        provider.processName = processNameFor(applicationInfo, nativeProviderProcess(index));
+        provider.enabled = nativeProviderEnabled(index);
         provider.name = nativeProviderClassName(index);
         provider.authority = nativeProviderAuthority(index);
         provider.directBootAware = nativeProviderDirectBootAware(index);
         provider.grantUriPermissions = nativeProviderGrantUriPermissions(index);
 
-        int entryCount = nativeProviderMetaDataCount(index);
-        if (entryCount > 0)
-        {
-            Bundle metaData = new Bundle();
-            for (int entry = 0; entry < entryCount; entry++)
-            {
-                metaData.putString(nativeProviderMetaDataName(index, entry), nativeProviderMetaDataValue(index, entry));
-            }
-            provider.metaData = metaData;
-        }
+        provider.metaData = MetaData.read(resources, MetaData.PROVIDER, index);
 
         return provider;
     }
@@ -694,6 +758,10 @@ public final class Bootstrap
 
     static native String nativeComponentMetaDataValue(int kind, int index, int entry);
 
+    static native int nativeComponentMetaDataType(int kind, int index, int entry);
+
+    static native int nativeComponentMetaDataData(int kind, int index, int entry);
+
     static native String nativeFilterActions(int kind, int index, int filterIndex);
 
     static native String nativeFilterCategories(int kind, int index, int filterIndex);
@@ -729,6 +797,10 @@ public final class Bootstrap
     private static native String nativeProviderAuthority(int index);
 
     private static native boolean nativeProviderDirectBootAware(int index);
+
+    private static native boolean nativeProviderEnabled(int index);
+
+    private static native String nativeProviderProcess(int index);
 
     private static native boolean nativeProviderGrantUriPermissions(int index);
 

@@ -228,6 +228,25 @@ static jlong ResourcesOpenXmlResource(JNIEnv*, jclass, jlong handle, jint resour
     return xmlHandle;
 }
 
+static jlong ResourcesOpenXmlBuffer(JNIEnv* env, jclass, jlong handle, jbyteArray data)
+{
+    AndroidfwApk* apk = ApkFrom(handle);
+    if (!apk || !data) return 0;
+
+    jsize length = env->GetArrayLength(data);
+    if (length <= 0) return 0;
+
+    std::vector<jbyte> bytes(static_cast<size_t>(length));
+    env->GetByteArrayRegion(data, 0, length, bytes.data());
+
+    AndroidfwXml* xml = AndroidfwXmlOpenBuffer(apk, bytes.data(), static_cast<uint32_t>(length));
+    if (!xml) return 0;
+
+    jlong xmlHandle = reinterpret_cast<jlong>(xml);
+    RegisterHandle(gLiveXml, xmlHandle);
+    return xmlHandle;
+}
+
 static bool ReadAttributes(JNIEnv* env, jintArray attributes, std::vector<uint32_t>& out)
 {
     jsize count = env->GetArrayLength(attributes);
@@ -602,6 +621,7 @@ static const JNINativeMethod RESOURCE_METHODS[] = {
     {"nativeGetArraySize", "(JI)I", reinterpret_cast<void*>(&ResourcesGetArraySize)},
     {"nativeGetArrayEntry", "(JII)[I", reinterpret_cast<void*>(&ResourcesGetArrayEntry)},
     {"nativeOpenXmlResource", "(JI)J", reinterpret_cast<void*>(&ResourcesOpenXmlResource)},
+    {"nativeOpenXmlBuffer", "(J[B)J", reinterpret_cast<void*>(&ResourcesOpenXmlBuffer)},
     {"nativeObtainNoTheme", "(JJ[I[I[I)V", reinterpret_cast<void*>(&ResourcesObtainNoTheme)},
     {"nativeCreateTheme", "(J)J", reinterpret_cast<void*>(&ResourcesCreateTheme)},
     {"nativeApplyStyle", "(JIZ)V", reinterpret_cast<void*>(&ResourcesApplyStyle)},

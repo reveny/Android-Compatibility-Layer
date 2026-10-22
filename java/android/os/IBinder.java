@@ -28,4 +28,14 @@ public interface IBinder
     boolean unlinkToDeath(DeathRecipient recipient, int flags);
 
     void dump(java.io.FileDescriptor target, String[] arguments);
+
+    default void dumpAsync(java.io.FileDescriptor target, String[] arguments) throws RemoteException
+    {
+        dump(target, arguments);
+    }
+
+    static int getSuggestedMaxIpcSizeBytes()
+    {
+        return 64 * 1024;
+    }
 }

@@ -150,6 +150,35 @@ public class RecordingCanvas extends Canvas
     }
 
     @Override
+    public void drawColor(int color, BlendMode mode)
+    {
+        mDisplayList.record(target -> target.drawColor(color, mode));
+    }
+
+    @Override
+    public boolean quickReject(float left, float top, float right, float bottom)
+    {
+        return right <= left || bottom <= top;
+    }
+
+    @Override
+    public boolean quickReject(Path path)
+    {
+        return path == null || path.isEmpty();
+    }
+
+    @Override
+    public void drawBitmap(Bitmap bitmap, Rect source, RectF destination, Paint paint)
+    {
+        if (bitmap == null || destination == null) return;
+
+        Rect sourceCopy = source == null ? null : new Rect(source);
+        RectF destinationCopy = new RectF(destination);
+        Paint copy = paint == null ? null : new Paint(paint);
+        mDisplayList.record(target -> target.drawBitmap(bitmap, sourceCopy, destinationCopy, copy));
+    }
+
+    @Override
     public void drawPath(Path path, Paint paint)
     {
         if (path == null || paint == null) return;

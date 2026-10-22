@@ -58,6 +58,8 @@ static const Apk::ProviderInfo* ProviderAt(jint index)
 static constexpr jint COMPONENT_ACTIVITY = 0;
 static constexpr jint COMPONENT_SERVICE = 1;
 static constexpr jint COMPONENT_RECEIVER = 2;
+static constexpr jint COMPONENT_PROVIDER = 3;
+static constexpr jint COMPONENT_APPLICATION = 4;
 
 static const std::vector<Apk::IntentFilterInfo>* FiltersFor(jint kind, jint index)
 {
@@ -207,7 +209,37 @@ static const std::vector<Apk::MetaDataEntry>* ComponentMetaDataAt(jint kind, jin
     if (kind == COMPONENT_RECEIVER && at < gPackage->manifest.receivers.size())
         return &gPackage->manifest.receivers[at].metaData;
 
+    if (kind == COMPONENT_PROVIDER && at < gPackage->manifest.providers.size())
+        return &gPackage->manifest.providers[at].metaData;
+
+    if (kind == COMPONENT_APPLICATION && at == 0) return &gPackage->manifest.applicationMetaData;
+
     return nullptr;
+}
+
+static const Apk::MetaDataEntry* ComponentMetaDataEntry(jint kind, jint index, jint entry)
+{
+    const std::vector<Apk::MetaDataEntry>* entries = ComponentMetaDataAt(kind, index);
+    if (!entries || entry < 0 || static_cast<size_t>(entry) >= entries->size()) return nullptr;
+
+    return &(*entries)[static_cast<size_t>(entry)];
+}
+
+static jint BootstrapComponentMetaDataType(JNIEnv*, jclass, jint kind, jint index, jint entry)
+{
+    const Apk::MetaDataEntry* found = ComponentMetaDataEntry(kind, index, entry);
+    if (!found) return Apk::META_DATA_NO_VALUE;
+    if (found->resource != 0) return Apk::META_DATA_RESOURCE;
+
+    return found->valueType;
+}
+
+static jint BootstrapComponentMetaDataData(JNIEnv*, jclass, jint kind, jint index, jint entry)
+{
+    const Apk::MetaDataEntry* found = ComponentMetaDataEntry(kind, index, entry);
+    if (!found) return 0;
+
+    return static_cast<jint>(found->resource != 0 ? found->resource : found->valueData);
 }
 
 static jint BootstrapComponentMetaDataCount(JNIEnv*, jclass, jint kind, jint index)
@@ -447,6 +479,19 @@ static jboolean BootstrapProviderGrantUriPermissions(JNIEnv*, jclass, jint index
     return provider && provider->grantUriPermissions ? JNI_TRUE : JNI_FALSE;
 }
 
+static jboolean BootstrapProviderEnabled(JNIEnv*, jclass, jint index)
+{
+    const Apk::ProviderInfo* provider = ProviderAt(index);
+    return provider && provider->enabled ? JNI_TRUE : JNI_FALSE;
+}
+
+static jstring BootstrapProviderProcess(JNIEnv* env, jclass, jint index)
+{
+    const Apk::ProviderInfo* provider = ProviderAt(index);
+    if (!provider || provider->process.empty()) return nullptr;
+    return MakeString(env, provider->process);
+}
+
 static jint BootstrapProviderMetaDataCount(JNIEnv*, jclass, jint index)
 {
     const Apk::ProviderInfo* provider = ProviderAt(index);
@@ -607,6 +652,8 @@ static const JNINativeMethod BOOTSTRAP_METHODS[] = {
     {"nativeProviderAuthority", "(I)Ljava/lang/String;", reinterpret_cast<void*>(&BootstrapProviderAuthority)},
     {"nativeProviderDirectBootAware", "(I)Z", reinterpret_cast<void*>(&BootstrapProviderDirectBootAware)},
     {"nativeProviderGrantUriPermissions", "(I)Z", reinterpret_cast<void*>(&BootstrapProviderGrantUriPermissions)},
+    {"nativeProviderEnabled", "(I)Z", reinterpret_cast<void*>(&BootstrapProviderEnabled)},
+    {"nativeProviderProcess", "(I)Ljava/lang/String;", reinterpret_cast<void*>(&BootstrapProviderProcess)},
     {"nativeProviderMetaDataCount", "(I)I", reinterpret_cast<void*>(&BootstrapProviderMetaDataCount)},
     {"nativeProviderMetaDataName", "(II)Ljava/lang/String;", reinterpret_cast<void*>(&BootstrapProviderMetaDataName)},
     {"nativeProviderMetaDataValue", "(II)Ljava/lang/String;", reinterpret_cast<void*>(&BootstrapProviderMetaDataValue)},
@@ -622,6 +669,8 @@ static const JNINativeMethod BOOTSTRAP_METHODS[] = {
     {"nativeComponentMetaDataCount", "(II)I", reinterpret_cast<void*>(&BootstrapComponentMetaDataCount)},
     {"nativeComponentMetaDataName", "(III)Ljava/lang/String;", reinterpret_cast<void*>(&BootstrapComponentMetaDataName)},
     {"nativeComponentMetaDataValue", "(III)Ljava/lang/String;", reinterpret_cast<void*>(&BootstrapComponentMetaDataValue)},
+    {"nativeComponentMetaDataType", "(III)I", reinterpret_cast<void*>(&BootstrapComponentMetaDataType)},
+    {"nativeComponentMetaDataData", "(III)I", reinterpret_cast<void*>(&BootstrapComponentMetaDataData)},
     {"nativeFilterActions", "(III)Ljava/lang/String;", reinterpret_cast<void*>(&BootstrapFilterActions)},
     {"nativeFilterCategories", "(III)Ljava/lang/String;", reinterpret_cast<void*>(&BootstrapFilterCategories)},
     {"nativeFilterSchemes", "(III)Ljava/lang/String;", reinterpret_cast<void*>(&BootstrapFilterSchemes)},

@@ -30,6 +30,18 @@ public class LinearGradient extends Shader
         this(startX, startY, endX, endY, new int[] {startColor, endColor}, null, tileMode);
     }
 
+    public LinearGradient(float startX, float startY, float endX, float endY, long[] colors, float[] positions,
+                          TileMode tileMode)
+    {
+        this(startX, startY, endX, endY, argbColors(colors), positions, tileMode);
+    }
+
+    public LinearGradient(float startX, float startY, float endX, float endY, long startColor, long endColor,
+                          TileMode tileMode)
+    {
+        this(startX, startY, endX, endY, new long[] {startColor, endColor}, null, tileMode);
+    }
+
     @Override
     int kind()
     {

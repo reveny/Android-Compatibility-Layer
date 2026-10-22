@@ -16,7 +16,9 @@ if(STALE_DEX)
     file(REMOVE ${STALE_DEX})
 endif()
 
-string(REPLACE "|" ";" SOURCES "${SOURCE_LIST}")
+if(NOT EXISTS "${SOURCE_FILE}")
+    message(FATAL_ERROR "the framework source list ${SOURCE_FILE} is missing")
+endif()
 
 set(JAVAC_CLASSPATH_ARGS)
 if(EXTRA_CLASSPATH)
@@ -24,7 +26,7 @@ if(EXTRA_CLASSPATH)
 endif()
 
 execute_process(
-    COMMAND ${JAVAC} --release 11 -nowarn ${JAVAC_CLASSPATH_ARGS} -d "${CLASSES_DIR}" ${SOURCES}
+    COMMAND ${JAVAC} --release 11 -nowarn ${JAVAC_CLASSPATH_ARGS} -d "${CLASSES_DIR}" "@${SOURCE_FILE}"
     RESULT_VARIABLE JAVAC_STATUS
 )
 if(NOT JAVAC_STATUS EQUAL 0)

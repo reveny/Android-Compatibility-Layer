@@ -17,6 +17,9 @@ bool RasterizerBuildOutline(const Rasterizer::Path& path, const Rasterizer::Tran
 FT_Library RasterizerOutlineLibrary();
 
 static constexpr int GRADIENT_RAMP_SIZE = 256;
+static constexpr float MAXIMUM_STROKE_WIDTH = 8192.0f;
+static constexpr float DEFAULT_MITER_LIMIT = 4.0f;
+static constexpr float MAXIMUM_MITER_LIMIT = 1000.0f;
 
 struct SpanTarget
 {
@@ -224,8 +227,65 @@ static uint32_t PremultipliedSourceAt(const SpanTarget& target, int32_t deviceX,
     return target.ramp[index];
 }
 
+static uint32_t LerpChannel(uint32_t from, uint32_t to, uint32_t coverage)
+{
+    return DivideBy255(from * (255 - coverage) + to * coverage);
+}
+
+static uint32_t BlendDestinationModes(Rasterizer::BlendMode blend, uint32_t source, uint32_t destination, uint32_t coverage)
+{
+    uint32_t sourceAlpha = ChannelOf(source, 24);
+    uint32_t destinationAlpha = ChannelOf(destination, 24);
+    uint32_t sourceInverse = 255 - sourceAlpha;
+    uint32_t destinationInverse = 255 - destinationAlpha;
+
+    uint32_t blended[4];
+
+    for (int channel = 0; channel < 4; ++channel)
+    {
+        int shift = 24 - channel * 8;
+        uint32_t sourceValue = ChannelOf(source, shift);
+        uint32_t destinationValue = ChannelOf(destination, shift);
+        uint32_t result = destinationValue;
+
+        switch (blend)
+        {
+            case Rasterizer::BlendMode::DestinationIn:
+                result = DivideBy255(destinationValue * sourceAlpha);
+                break;
+
+            case Rasterizer::BlendMode::DestinationAtop:
+                result = channel == 0 ? sourceAlpha
+                                      : DivideBy255(destinationValue * sourceAlpha) + DivideBy255(sourceValue * destinationInverse);
+                break;
+
+            case Rasterizer::BlendMode::SourceOut:
+                result = DivideBy255(sourceValue * destinationInverse);
+                break;
+
+            case Rasterizer::BlendMode::Xor:
+                result = DivideBy255(sourceValue * destinationInverse) + DivideBy255(destinationValue * sourceInverse);
+                break;
+
+            default: break;
+        }
+
+        blended[channel] = LerpChannel(destinationValue, result > 255 ? 255 : result, coverage);
+    }
+
+    return PackColor(blended[0], blended[1], blended[2], blended[3]);
+}
+
 uint32_t RasterizerBlendPixel(Rasterizer::BlendMode blend, uint32_t premultiplied, uint32_t destination, uint32_t coverage)
 {
+    if (blend == Rasterizer::BlendMode::Destination) return destination;
+
+    if (blend == Rasterizer::BlendMode::DestinationIn || blend == Rasterizer::BlendMode::DestinationAtop ||
+        blend == Rasterizer::BlendMode::SourceOut || blend == Rasterizer::BlendMode::Xor)
+    {
+        return BlendDestinationModes(blend, premultiplied, destination, coverage);
+    }
+
     if (blend == Rasterizer::BlendMode::Clear)
     {
         uint32_t kept = 255 - coverage;
@@ -541,13 +601,17 @@ Rasterizer::Result Rasterizer::StrokePath(Canvas& canvas, const Path& path, cons
 
     const Transform& transform = StateAt(canvas, canvas.depth - 1).transform;
     float scale = std::sqrt(std::fabs(transform.scaleX * transform.scaleY - transform.skewX * transform.skewY));
-    if (scale <= 0.0f) scale = 1.0f;
+    if (!std::isfinite(scale) || scale <= 0.0f) scale = 1.0f;
 
     float width = style.width * scale;
-    if (width < 1.0f) width = 1.0f;
+    if (!std::isfinite(width) || width < 1.0f) width = 1.0f;
+    if (width > MAXIMUM_STROKE_WIDTH) width = MAXIMUM_STROKE_WIDTH;
 
-    FT_Stroker_Set(stroker, static_cast<FT_Fixed>(width * 32.0f), cap, join,
-                   static_cast<FT_Fixed>(style.miterLimit * 65536.0f));
+    float miterLimit = style.miterLimit;
+    if (!std::isfinite(miterLimit) || miterLimit < 1.0f) miterLimit = DEFAULT_MITER_LIMIT;
+    if (miterLimit > MAXIMUM_MITER_LIMIT) miterLimit = MAXIMUM_MITER_LIMIT;
+
+    FT_Stroker_Set(stroker, static_cast<FT_Fixed>(width * 32.0f), cap, join, static_cast<FT_Fixed>(miterLimit * 65536.0f));
 
     Result outcome = Result::Ok;
 

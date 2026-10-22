@@ -6,6 +6,10 @@
 #include <cstring>
 #include <elf.h>
 
+static constexpr uint64_t DT_ANDROID_REL_TAG = 0x6000000full;
+static constexpr uint64_t DT_ANDROID_RELSZ_TAG = 0x60000010ull;
+static constexpr uint64_t DT_ANDROID_RELA_TAG = 0x60000011ull;
+static constexpr uint64_t DT_ANDROID_RELASZ_TAG = 0x60000012ull;
 static constexpr uint64_t DT_ANDROID_RELR_TAG = 0x6fffe000ull;
 static constexpr uint64_t DT_ANDROID_RELRSZ_TAG = 0x6fffe001ull;
 static constexpr uint64_t DT_ANDROID_RELRENT_TAG = 0x6fffe003ull;
@@ -27,6 +31,9 @@ struct ElfDynamicInfo
     uint64_t rela = 0;
     uint64_t relaSize = 0;
     uint64_t relaEntrySize = sizeof(Elf64_Rela);
+    uint64_t packedRela = 0;
+    uint64_t packedRelaSize = 0;
+    bool hasPackedRel = false;
     uint64_t jumpRelocations = 0;
     uint64_t pltRelocationSize = 0;
     uint64_t pltRelocationType = DT_RELA;
@@ -184,6 +191,10 @@ static ElfLoader::Result ParseDynamic(const uint8_t* data, uint64_t length, cons
             case DT_RELA: info.rela = value; break;
             case DT_RELASZ: info.relaSize = value; break;
             case DT_RELAENT: info.relaEntrySize = value; break;
+            case DT_ANDROID_RELA_TAG: info.packedRela = value; break;
+            case DT_ANDROID_RELASZ_TAG: info.packedRelaSize = value; break;
+            case DT_ANDROID_REL_TAG:
+            case DT_ANDROID_RELSZ_TAG: info.hasPackedRel = true; break;
             case DT_JMPREL: info.jumpRelocations = value; break;
             case DT_PLTRELSZ: info.pltRelocationSize = value; break;
             case DT_PLTREL: info.pltRelocationType = value; break;
@@ -414,6 +425,9 @@ static ElfLoader::Result ApplyThreadLocalRelocation(ElfLoader::Namespace& librar
     return ElfLoader::Result::Ok;
 }
 
+static ElfLoader::Result ApplyRelaEntries(ElfLoader::Namespace& libraryNamespace, ElfLoader::Library& library,
+                                          const std::vector<Elf64_Rela>& entries);
+
 static ElfLoader::Result ApplyRelaTable(ElfLoader::Namespace& libraryNamespace, ElfLoader::Library& library, const uint8_t* data,
                                         uint64_t length, const Elf64_Ehdr& header, const ElfDynamicInfo& info, uint64_t tableAddress,
                                         uint64_t tableSize)
@@ -429,12 +443,146 @@ static ElfLoader::Result ApplyRelaTable(ElfLoader::Namespace& libraryNamespace, 
     uint64_t stringOffset = 0;
     if (!FileOffsetOf(data, length, header, info.stringTable, info.stringTableSize, stringOffset)) return ElfLoader::Result::MalformedElf;
 
+    std::vector<Elf64_Rela> entries((size_t)count);
+    for (uint64_t index = 0; index < count; ++index)
+    {
+        if (!ReadImage(data, length, tableOffset + index * sizeof(Elf64_Rela), &entries[(size_t)index], sizeof(Elf64_Rela)))
+            return ElfLoader::Result::MalformedElf;
+    }
+
+    return ApplyRelaEntries(libraryNamespace, library, entries);
+}
+
+static bool ReadSleb128(const uint8_t* data, uint64_t end, uint64_t& cursor, int64_t& value)
+{
+    uint64_t result = 0;
+    uint32_t shift = 0;
+    uint8_t byte = 0;
+
+    do
+    {
+        if (cursor >= end || shift >= 64) return false;
+
+        byte = data[cursor++];
+        result |= (uint64_t)(byte & 0x7f) << shift;
+        shift += 7;
+    } while (byte & 0x80);
+
+    if (shift < 64 && (byte & 0x40)) result |= ~0ull << shift;
+
+    value = (int64_t)result;
+    return true;
+}
+
+static constexpr int64_t PACKED_GROUPED_BY_INFO = 1;
+static constexpr int64_t PACKED_GROUPED_BY_OFFSET_DELTA = 2;
+static constexpr int64_t PACKED_GROUPED_BY_ADDEND = 4;
+static constexpr int64_t PACKED_GROUP_HAS_ADDEND = 8;
+
+static ElfLoader::Result DecodePackedRelocations(const uint8_t* data, uint64_t length, const Elf64_Ehdr& header, uint64_t tableAddress,
+                                                 uint64_t tableSize, std::vector<Elf64_Rela>& entries)
+{
+    entries.clear();
+
+    uint64_t tableOffset = 0;
+    if (!FileOffsetOf(data, length, header, tableAddress, tableSize, tableOffset)) return ElfLoader::Result::MalformedElf;
+    if (tableSize < 4 || memcmp(data + tableOffset, "APS2", 4) != 0) return ElfLoader::Result::UnsupportedRelocation;
+
+    uint64_t cursor = tableOffset + 4;
+    uint64_t end = tableOffset + tableSize;
+
+    int64_t remaining = 0;
+    int64_t offset = 0;
+    if (!ReadSleb128(data, end, cursor, remaining) || !ReadSleb128(data, end, cursor, offset)) return ElfLoader::Result::MalformedElf;
+    if (remaining < 0 || (uint64_t)remaining > MAX_RELOCATIONS) return ElfLoader::Result::MalformedElf;
+
+    entries.reserve((size_t)remaining);
+
+    int64_t info = 0;
+    int64_t addend = 0;
+
+    while (remaining > 0)
+    {
+        int64_t groupSize = 0;
+        int64_t groupFlags = 0;
+        if (!ReadSleb128(data, end, cursor, groupSize) || !ReadSleb128(data, end, cursor, groupFlags)) return ElfLoader::Result::MalformedElf;
+        if (groupSize <= 0 || groupSize > remaining) return ElfLoader::Result::MalformedElf;
+
+        bool byInfo = (groupFlags & PACKED_GROUPED_BY_INFO) != 0;
+        bool byOffsetDelta = (groupFlags & PACKED_GROUPED_BY_OFFSET_DELTA) != 0;
+        bool byAddend = (groupFlags & PACKED_GROUPED_BY_ADDEND) != 0;
+        bool hasAddend = (groupFlags & PACKED_GROUP_HAS_ADDEND) != 0;
+
+        int64_t offsetDelta = 0;
+        if (byOffsetDelta && !ReadSleb128(data, end, cursor, offsetDelta)) return ElfLoader::Result::MalformedElf;
+        if (byInfo && !ReadSleb128(data, end, cursor, info)) return ElfLoader::Result::MalformedElf;
+
+        if (hasAddend && byAddend)
+        {
+            int64_t delta = 0;
+            if (!ReadSleb128(data, end, cursor, delta)) return ElfLoader::Result::MalformedElf;
+            addend += delta;
+        }
+        else if (!hasAddend)
+        {
+            addend = 0;
+        }
+
+        for (int64_t index = 0; index < groupSize; ++index)
+        {
+            int64_t step = offsetDelta;
+            if (!byOffsetDelta && !ReadSleb128(data, end, cursor, step)) return ElfLoader::Result::MalformedElf;
+            offset += step;
+
+            if (!byInfo && !ReadSleb128(data, end, cursor, info)) return ElfLoader::Result::MalformedElf;
+
+            if (hasAddend && !byAddend)
+            {
+                int64_t delta = 0;
+                if (!ReadSleb128(data, end, cursor, delta)) return ElfLoader::Result::MalformedElf;
+                addend += delta;
+            }
+
+            Elf64_Rela entry;
+            entry.r_offset = (Elf64_Addr)offset;
+            entry.r_info = (Elf64_Xword)info;
+            entry.r_addend = (Elf64_Sxword)addend;
+            entries.push_back(entry);
+        }
+
+        remaining -= groupSize;
+    }
+
+    return ElfLoader::Result::Ok;
+}
+
+static ElfLoader::Result ApplyPackedRelaTable(ElfLoader::Namespace& libraryNamespace, ElfLoader::Library& library, const uint8_t* data,
+                                              uint64_t length, const Elf64_Ehdr& header, uint64_t tableAddress, uint64_t tableSize)
+{
+    if (tableSize == 0) return ElfLoader::Result::Ok;
+
+    std::vector<Elf64_Rela> entries;
+    ElfLoader::Result decoded = DecodePackedRelocations(data, length, header, tableAddress, tableSize, entries);
+    if (decoded != ElfLoader::Result::Ok)
+    {
+        fprintf(stderr, "[elfloader] %s: the packed relocation table could not be decoded: %s\n", library.soname.c_str(),
+                ElfLoader::ResultName(decoded));
+        return decoded;
+    }
+
+    library.relocationCounts.packed += entries.size();
+    return ApplyRelaEntries(libraryNamespace, library, entries);
+}
+
+static ElfLoader::Result ApplyRelaEntries(ElfLoader::Namespace& libraryNamespace, ElfLoader::Library& library,
+                                          const std::vector<Elf64_Rela>& entries)
+{
     const GuestState::MemoryAccessor& memory = libraryNamespace.configuration.memory;
+    uint64_t count = entries.size();
 
     for (uint64_t index = 0; index < count; ++index)
     {
-        Elf64_Rela entry;
-        if (!ReadImage(data, length, tableOffset + index * sizeof(Elf64_Rela), &entry, sizeof(entry))) return ElfLoader::Result::MalformedElf;
+        const Elf64_Rela& entry = entries[(size_t)index];
 
         uint32_t type = (uint32_t)ELF64_R_TYPE(entry.r_info);
         uint32_t symbolIndex = (uint32_t)ELF64_R_SYM(entry.r_info);
@@ -915,6 +1063,18 @@ static ElfLoader::Result LoadImage(ElfLoader::Namespace& libraryNamespace, const
     self->dependencyModuleIds = dependencyIds;
 
     result = ApplyRelaTable(libraryNamespace, *self, data, length, header, info, info.rela, info.relaSize);
+    if (result != ElfLoader::Result::Ok) return result;
+
+    self = ElfLoader::FindLibrary(libraryNamespace, moduleId);
+    if (!self) return ElfLoader::Result::UnknownModule;
+
+    if (info.hasPackedRel)
+    {
+        fprintf(stderr, "[elfloader] %s uses DT_ANDROID_REL, which arm64 never emits\n", self->soname.c_str());
+        return ElfLoader::Result::UnsupportedRelocation;
+    }
+
+    result = ApplyPackedRelaTable(libraryNamespace, *self, data, length, header, info.packedRela, info.packedRelaSize);
     if (result != ElfLoader::Result::Ok) return result;
 
     self = ElfLoader::FindLibrary(libraryNamespace, moduleId);

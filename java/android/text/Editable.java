@@ -26,8 +26,22 @@ public interface Editable extends CharSequence, GetChars, Spannable, Appendable
 
     InputFilter[] getFilters();
 
-    interface Factory
+    class Factory
     {
-        Editable newEditable(CharSequence source);
+        private static final Factory INSTANCE = new Factory();
+
+        public Factory()
+        {
+        }
+
+        public static Factory getInstance()
+        {
+            return INSTANCE;
+        }
+
+        public Editable newEditable(CharSequence source)
+        {
+            return new SpannableStringBuilder(source);
+        }
     }
 }

@@ -1,7 +1,27 @@
 package android.graphics;
 
-public class Point
+import android.os.Parcel;
+import android.os.Parcelable;
+
+public class Point implements Parcelable
 {
+    public static final Parcelable.Creator<Point> CREATOR = new Parcelable.Creator<Point>()
+    {
+        @Override
+        public Point createFromParcel(Parcel source)
+        {
+            Point point = new Point();
+            point.readFromParcel(source);
+            return point;
+        }
+
+        @Override
+        public Point[] newArray(int size)
+        {
+            return new Point[size];
+        }
+    };
+
     public int x;
     public int y;
 
@@ -64,5 +84,24 @@ public class Point
     public String toString()
     {
         return "Point(" + x + ", " + y + ")";
+    }
+
+    @Override
+    public int describeContents()
+    {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(Parcel out, int flags)
+    {
+        out.writeInt(x);
+        out.writeInt(y);
+    }
+
+    public void readFromParcel(Parcel in)
+    {
+        x = in.readInt();
+        y = in.readInt();
     }
 }

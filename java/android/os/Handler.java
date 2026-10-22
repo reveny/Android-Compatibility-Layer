@@ -44,6 +44,17 @@ public class Handler
         return new Handler(looper);
     }
 
+    public static Handler createAsync(Looper looper, Callback callback)
+    {
+        return new Handler(looper, callback);
+    }
+
+    public String getMessageName(Message message)
+    {
+        if (message.callback != null) return message.callback.getClass().getName();
+        return "0x" + Integer.toHexString(message.what);
+    }
+
     public final Looper getLooper()
     {
         return mLooper;
@@ -81,9 +92,60 @@ public class Handler
         return sendMessageAtTime(Message.obtain(this, runnable), uptimeMillis);
     }
 
+    public final boolean postAtTime(Runnable runnable, Object token, long uptimeMillis)
+    {
+        Message message = Message.obtain(this, runnable);
+        message.obj = token;
+        return sendMessageAtTime(message, uptimeMillis);
+    }
+
+    public final boolean postDelayed(Runnable runnable, Object token, long delayMillis)
+    {
+        Message message = Message.obtain(this, runnable);
+        message.obj = token;
+        return sendMessageDelayed(message, delayMillis);
+    }
+
     public final boolean postAtFrontOfQueue(Runnable runnable)
     {
         return sendMessageAtTime(Message.obtain(this, runnable), 0);
+    }
+
+    public final boolean sendEmptyMessageAtTime(int what, long uptimeMillis)
+    {
+        return sendMessageAtTime(Message.obtain(this, what), uptimeMillis);
+    }
+
+    public final boolean sendMessageAtFrontOfQueue(Message message)
+    {
+        message.target = this;
+        return mQueue.enqueueMessage(message, 0);
+    }
+
+    public final boolean hasMessages(int what)
+    {
+        return mQueue.hasMessages(this, null, null, true, what);
+    }
+
+    public final boolean hasMessages(int what, Object token)
+    {
+        return mQueue.hasMessages(this, null, token, true, what);
+    }
+
+    public final boolean hasCallbacks(Runnable runnable)
+    {
+        return runnable != null && mQueue.hasMessages(this, runnable, null, false, 0);
+    }
+
+    public final boolean hasMessagesOrCallbacks()
+    {
+        return mQueue.hasMessages(this, null, null, false, 0);
+    }
+
+    @Override
+    public String toString()
+    {
+        return "Handler (" + getClass().getName() + ") {" + Integer.toHexString(System.identityHashCode(this)) + "}";
     }
 
     public final Message obtainMessage()

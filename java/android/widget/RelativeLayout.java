@@ -38,6 +38,7 @@ public class RelativeLayout extends ViewGroup
     private static final int UNRESOLVED = Integer.MIN_VALUE;
 
     private int mGravity = Gravity.START | Gravity.TOP;
+    private int mIgnoreGravity = View.NO_ID;
 
     public RelativeLayout(Context context)
     {
@@ -77,8 +78,31 @@ public class RelativeLayout extends ViewGroup
         setGravity((mGravity & ~Gravity.VERTICAL_GRAVITY_MASK) | (gravity & Gravity.VERTICAL_GRAVITY_MASK));
     }
 
+    public int getGravity()
+    {
+        return mGravity;
+    }
+
     public void setIgnoreGravity(int viewId)
     {
+        mIgnoreGravity = viewId;
+    }
+
+    public int getIgnoreGravity()
+    {
+        return mIgnoreGravity;
+    }
+
+    @Override
+    public boolean shouldDelayChildPressedState()
+    {
+        return false;
+    }
+
+    @Override
+    public CharSequence getAccessibilityClassName()
+    {
+        return RelativeLayout.class.getName();
     }
 
     @Override
@@ -331,6 +355,8 @@ public class RelativeLayout extends ViewGroup
 
         private final int[] mRules = new int[RULE_COUNT];
 
+        public boolean alignWithParent;
+
         int left;
         int top;
         int right;
@@ -382,6 +408,20 @@ public class RelativeLayout extends ViewGroup
         public LayoutParams(MarginLayoutParams source)
         {
             super(source);
+        }
+
+        public LayoutParams(LayoutParams source)
+        {
+            super(source);
+
+            this.alignWithParent = source.alignWithParent;
+            System.arraycopy(source.mRules, 0, mRules, 0, RULE_COUNT);
+        }
+
+        public String debug(String output)
+        {
+            return output + "ViewGroup.LayoutParams={ width=" + LinearLayout.LayoutParams.sizeToString(width) + ", height="
+                + LinearLayout.LayoutParams.sizeToString(height) + " }";
         }
 
         public void addRule(int verb)

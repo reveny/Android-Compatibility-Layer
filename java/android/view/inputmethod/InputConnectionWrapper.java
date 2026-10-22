@@ -160,6 +160,43 @@ public class InputConnectionWrapper implements InputConnection
     }
 
     @Override
+    public boolean requestCursorUpdates(int cursorUpdateMode, int cursorUpdateFilter)
+    {
+        return mTarget != null && mTarget.requestCursorUpdates(cursorUpdateMode, cursorUpdateFilter);
+    }
+
+    @Override
+    public boolean performSpellCheck()
+    {
+        return mTarget != null && mTarget.performSpellCheck();
+    }
+
+    @Override
+    public void performHandwritingGesture(HandwritingGesture gesture, java.util.concurrent.Executor executor,
+                                          java.util.function.IntConsumer consumer)
+    {
+        if (mTarget != null) mTarget.performHandwritingGesture(gesture, executor, consumer);
+    }
+
+    @Override
+    public boolean previewHandwritingGesture(PreviewableHandwritingGesture gesture, android.os.CancellationSignal cancellationSignal)
+    {
+        return mTarget != null && mTarget.previewHandwritingGesture(gesture, cancellationSignal);
+    }
+
+    @Override
+    public android.os.Handler getHandler()
+    {
+        return mTarget == null ? null : mTarget.getHandler();
+    }
+
+    @Override
+    public boolean setImeConsumesInput(boolean imeConsumesInput)
+    {
+        return mTarget != null && mTarget.setImeConsumesInput(imeConsumesInput);
+    }
+
+    @Override
     public void closeConnection()
     {
         if (mTarget != null) mTarget.closeConnection();
@@ -169,5 +206,54 @@ public class InputConnectionWrapper implements InputConnection
     public boolean commitContent(InputContentInfo inputContentInfo, int flags, Bundle opts)
     {
         return mTarget != null && mTarget.commitContent(inputContentInfo, flags, opts);
+    }
+
+    @Override
+    public SurroundingText getSurroundingText(int beforeLength, int afterLength, int flags)
+    {
+        return mTarget == null ? null : mTarget.getSurroundingText(beforeLength, afterLength, flags);
+    }
+
+    @Override
+    public boolean setComposingText(CharSequence text, int newCursorPosition, TextAttribute textAttribute)
+    {
+        return mTarget != null && mTarget.setComposingText(text, newCursorPosition, textAttribute);
+    }
+
+    @Override
+    public boolean setComposingRegion(int start, int end, TextAttribute textAttribute)
+    {
+        return mTarget != null && mTarget.setComposingRegion(start, end, textAttribute);
+    }
+
+    @Override
+    public boolean commitText(CharSequence text, int newCursorPosition, TextAttribute textAttribute)
+    {
+        return mTarget != null && mTarget.commitText(text, newCursorPosition, textAttribute);
+    }
+
+    @Override
+    public boolean replaceText(int start, int end, CharSequence text, int newCursorPosition, TextAttribute textAttribute)
+    {
+        return mTarget != null && mTarget.replaceText(start, end, text, newCursorPosition, textAttribute);
+    }
+
+    @Override
+    public TextSnapshot takeSnapshot()
+    {
+        return mTarget == null ? null : mTarget.takeSnapshot();
+    }
+
+    @Override
+    public void requestTextBoundsInfo(android.graphics.RectF bounds, java.util.concurrent.Executor executor,
+                                      java.util.function.Consumer<TextBoundsInfoResult> consumer)
+    {
+        if (mTarget == null)
+        {
+            executor.execute(() -> consumer.accept(new TextBoundsInfoResult(TextBoundsInfoResult.CODE_UNSUPPORTED)));
+            return;
+        }
+
+        mTarget.requestTextBoundsInfo(bounds, executor, consumer);
     }
 }

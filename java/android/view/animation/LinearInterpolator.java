@@ -1,7 +1,18 @@
 package android.view.animation;
 
-public class LinearInterpolator implements Interpolator
+import android.content.Context;
+import android.util.AttributeSet;
+
+public class LinearInterpolator extends BaseInterpolator
 {
+    public LinearInterpolator()
+    {
+    }
+
+    public LinearInterpolator(Context context, AttributeSet attributes)
+    {
+    }
+
     @Override
     public float getInterpolation(float input)
     {

@@ -119,7 +119,12 @@ namespace Rasterizer
         Multiply,
         Screen,
         Plus,
-        Clear
+        Clear,
+        DestinationIn,
+        DestinationAtop,
+        SourceOut,
+        Xor,
+        Destination
     };
 
     enum class LineCap : uint8_t

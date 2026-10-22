@@ -12,6 +12,11 @@ public abstract class AccessibilityNodeProvider
         return null;
     }
 
+    public void addExtraDataToAccessibilityNodeInfo(int virtualViewId, AccessibilityNodeInfo info, String extraDataKey,
+                                                    android.os.Bundle arguments)
+    {
+    }
+
     public List<AccessibilityNodeInfo> findAccessibilityNodeInfosByText(String text, int virtualViewId)
     {
         return new ArrayList<>();

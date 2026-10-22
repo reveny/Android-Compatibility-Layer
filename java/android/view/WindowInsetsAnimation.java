@@ -1,6 +1,7 @@
 package android.view;
 
 import android.graphics.Insets;
+import android.view.animation.Interpolator;
 
 import java.util.List;
 
@@ -8,12 +9,12 @@ public final class WindowInsetsAnimation
 {
     private final int mTypeMask;
     private final long mDurationMillis;
-    private final android.animation.TimeInterpolator mInterpolator;
+    private final Interpolator mInterpolator;
 
     private float mFraction;
     private float mAlpha = 1.0f;
 
-    public WindowInsetsAnimation(int typeMask, android.animation.TimeInterpolator interpolator, long durationMillis)
+    public WindowInsetsAnimation(int typeMask, Interpolator interpolator, long durationMillis)
     {
         mTypeMask = typeMask;
         mInterpolator = interpolator;
@@ -40,7 +41,7 @@ public final class WindowInsetsAnimation
         return mInterpolator == null ? mFraction : mInterpolator.getInterpolation(mFraction);
     }
 
-    public android.animation.TimeInterpolator getInterpolator()
+    public Interpolator getInterpolator()
     {
         return mInterpolator;
     }
@@ -83,7 +84,19 @@ public final class WindowInsetsAnimation
 
         public Bounds inset(Insets insets)
         {
-            return this;
+            return new Bounds(subtract(mLowerBound, insets), subtract(mUpperBound, insets));
+        }
+
+        private static Insets subtract(Insets source, Insets insets)
+        {
+            return Insets.of(Math.max(0, source.left - insets.left), Math.max(0, source.top - insets.top),
+                             Math.max(0, source.right - insets.right), Math.max(0, source.bottom - insets.bottom));
+        }
+
+        @Override
+        public String toString()
+        {
+            return "Bounds{lower=" + mLowerBound + " upper=" + mUpperBound + "}";
         }
     }
 

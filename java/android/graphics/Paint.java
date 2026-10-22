@@ -83,7 +83,487 @@ public class Paint
         mBlendMode = from.mBlendMode;
         mMaskFilter = from.mMaskFilter;
         mPathEffect = from.mPathEffect;
+        mTextLocale = from.mTextLocale;
+        mHinting = from.mHinting;
+        mElegantTextHeight = from.mElegantTextHeight;
+        mShadowRadius = from.mShadowRadius;
+        mShadowDx = from.mShadowDx;
+        mShadowDy = from.mShadowDy;
+        mShadowColor = from.mShadowColor;
+        mWordSpacing = from.mWordSpacing;
+        mFontVariationSettings = from.mFontVariationSettings;
+        mStartHyphenEdit = from.mStartHyphenEdit;
+        mEndHyphenEdit = from.mEndHyphenEdit;
         mStyleId = 0;
+    }
+
+    public static final int CURSOR_AFTER = 0;
+    public static final int CURSOR_AT_OR_AFTER = 1;
+    public static final int CURSOR_BEFORE = 2;
+    public static final int CURSOR_AT_OR_BEFORE = 3;
+    public static final int CURSOR_AT = 4;
+
+    public static final int START_HYPHEN_EDIT_NO_EDIT = 0;
+    public static final int START_HYPHEN_EDIT_INSERT_HYPHEN = 1;
+    public static final int START_HYPHEN_EDIT_INSERT_ZWJ = 2;
+
+    public static final int END_HYPHEN_EDIT_NO_EDIT = 0;
+    public static final int END_HYPHEN_EDIT_REPLACE_WITH_HYPHEN = 1;
+    public static final int END_HYPHEN_EDIT_INSERT_HYPHEN = 2;
+    public static final int END_HYPHEN_EDIT_INSERT_ARMENIAN_HYPHEN = 3;
+    public static final int END_HYPHEN_EDIT_INSERT_MAQAF = 4;
+    public static final int END_HYPHEN_EDIT_INSERT_UCAS_HYPHEN = 5;
+    public static final int END_HYPHEN_EDIT_INSERT_ZWJ_AND_HYPHEN = 6;
+
+    private static final float UNDERLINE_POSITION_RATIO = 1.0f / 9.0f;
+    private static final float DECORATION_THICKNESS_RATIO = 1.0f / 18.0f;
+    private static final float STRIKE_THRU_POSITION_RATIO = -0.27f;
+
+    private float mWordSpacing;
+    private String mFontVariationSettings;
+    private int mStartHyphenEdit;
+    private int mEndHyphenEdit;
+
+    public boolean isLinearText()
+    {
+        return (mFlags & LINEAR_TEXT_FLAG) != 0;
+    }
+
+    public void setLinearText(boolean enabled)
+    {
+        setFlagBit(LINEAR_TEXT_FLAG, enabled);
+    }
+
+    public float getUnderlinePosition()
+    {
+        return mTextSize * UNDERLINE_POSITION_RATIO;
+    }
+
+    public float getUnderlineThickness()
+    {
+        return Math.max(1.0f, mTextSize * DECORATION_THICKNESS_RATIO);
+    }
+
+    public float getStrikeThruPosition()
+    {
+        return mTextSize * STRIKE_THRU_POSITION_RATIO;
+    }
+
+    public float getStrikeThruThickness()
+    {
+        return Math.max(1.0f, mTextSize * DECORATION_THICKNESS_RATIO);
+    }
+
+    public long getColorLong()
+    {
+        return Color.pack(mColor);
+    }
+
+    public void setColor(long color)
+    {
+        setColor(Color.toArgb(color));
+    }
+
+    public void setARGB(int alpha, int red, int green, int blue)
+    {
+        setColor(((alpha & 0xFF) << 24) | ((red & 0xFF) << 16) | ((green & 0xFF) << 8) | (blue & 0xFF));
+    }
+
+    public boolean getFillPath(Path source, Path destination)
+    {
+        if (source == null || destination == null) return false;
+
+        destination.set(source);
+        return mStyle == null || mStyle == Style.FILL;
+    }
+
+    public void setShadowLayer(float radius, float dx, float dy, long shadowColor)
+    {
+        setShadowLayer(radius, dx, dy, Color.toArgb(shadowColor));
+    }
+
+    public long getShadowLayerColorLong()
+    {
+        return Color.pack(mShadowColor);
+    }
+
+    boolean hasShadowLayer()
+    {
+        return (mShadowRadius > 0 || mShadowDx != 0 || mShadowDy != 0) && (mShadowColor >>> 24) != 0;
+    }
+
+    public float getWordSpacing()
+    {
+        return mWordSpacing;
+    }
+
+    public void setWordSpacing(float wordSpacing)
+    {
+        mWordSpacing = wordSpacing;
+    }
+
+    public String getFontVariationSettings()
+    {
+        return mFontVariationSettings;
+    }
+
+    public boolean setFontVariationSettings(String settings)
+    {
+        String trimmed = settings == null ? null : settings.trim();
+        if (trimmed != null && trimmed.isEmpty()) trimmed = null;
+
+        if (trimmed != null)
+        {
+            for (String entry : trimmed.split(","))
+            {
+                String part = entry.trim();
+                if (part.length() < 7 || (part.charAt(0) != '\'' && part.charAt(0) != '"')) return false;
+                if (part.charAt(5) != part.charAt(0)) return false;
+
+                try
+                {
+                    Float.parseFloat(part.substring(6).trim());
+                }
+                catch (NumberFormatException exception)
+                {
+                    return false;
+                }
+            }
+        }
+
+        mFontVariationSettings = trimmed;
+        mStyleId = 0;
+        return true;
+    }
+
+    public int getStartHyphenEdit()
+    {
+        return mStartHyphenEdit;
+    }
+
+    public int getEndHyphenEdit()
+    {
+        return mEndHyphenEdit;
+    }
+
+    public void setStartHyphenEdit(int startHyphen)
+    {
+        mStartHyphenEdit = startHyphen;
+    }
+
+    public void setEndHyphenEdit(int endHyphen)
+    {
+        mEndHyphenEdit = endHyphen;
+    }
+
+    public void getFontMetricsInt(CharSequence text, int start, int count, int contextStart, int contextCount, boolean isRtl,
+                                  FontMetricsInt outMetrics)
+    {
+        if (text == null) throw new IllegalArgumentException("text must not be null");
+        if (outMetrics == null) throw new IllegalArgumentException("outMetrics must not be null");
+
+        getFontMetricsInt(outMetrics);
+    }
+
+    public void getFontMetricsInt(char[] text, int start, int count, int contextStart, int contextCount, boolean isRtl,
+                                  FontMetricsInt outMetrics)
+    {
+        if (text == null) throw new IllegalArgumentException("text must not be null");
+        if (outMetrics == null) throw new IllegalArgumentException("outMetrics must not be null");
+
+        getFontMetricsInt(outMetrics);
+    }
+
+    public boolean equalsForTextMeasurement(Paint other)
+    {
+        if (other == null) return false;
+        if (other == this) return true;
+
+        return mTextSize == other.mTextSize && mTextScaleX == other.mTextScaleX && mTextSkewX == other.mTextSkewX
+            && mLetterSpacing == other.mLetterSpacing && mWordSpacing == other.mWordSpacing && mFlags == other.mFlags
+            && mTypeface == other.mTypeface && mStartHyphenEdit == other.mStartHyphenEdit
+            && mEndHyphenEdit == other.mEndHyphenEdit && java.util.Objects.equals(mTextLocale, other.mTextLocale)
+            && java.util.Objects.equals(mFontFeatureSettings, other.mFontFeatureSettings)
+            && java.util.Objects.equals(mFontVariationSettings, other.mFontVariationSettings);
+    }
+
+    private static char[] charsOf(CharSequence text, int start, int end)
+    {
+        char[] chars = new char[end - start];
+        for (int index = start; index < end; index++)
+        {
+            chars[index - start] = text.charAt(index);
+        }
+
+        return chars;
+    }
+
+    private static void checkRange(int length, int start, int end)
+    {
+        if ((start | end | (end - start) | (length - end)) < 0) throw new IndexOutOfBoundsException();
+    }
+
+    public float measureText(String text, int start, int end)
+    {
+        if (text == null) throw new IllegalArgumentException("text cannot be null");
+        checkRange(text.length(), start, end);
+
+        return measureText((CharSequence) text, start, end);
+    }
+
+    public int breakText(CharSequence text, int start, int end, boolean measureForwards, float maxWidth, float[] measuredWidth)
+    {
+        if (text == null) throw new IllegalArgumentException("text cannot be null");
+        checkRange(text.length(), start, end);
+        if (end == start) return 0;
+
+        return breakText(charsOf(text, start, end), 0, end - start, maxWidth, measureForwards, measuredWidth);
+    }
+
+    public int getTextWidths(CharSequence text, int start, int end, float[] widths)
+    {
+        if (text == null) throw new IllegalArgumentException("text cannot be null");
+        checkRange(text.length(), start, end);
+        if (end - start > widths.length) throw new ArrayIndexOutOfBoundsException();
+        if (end == start) return 0;
+
+        return getTextWidths(charsOf(text, start, end), 0, end - start, widths);
+    }
+
+    public float getTextRunAdvances(char[] chars, int index, int count, int contextIndex, int contextCount, boolean isRtl,
+                                    float[] advances, int advancesIndex)
+    {
+        if (chars == null) throw new IllegalArgumentException("text cannot be null");
+        if ((index | count | contextIndex | contextCount | advancesIndex | (index - contextIndex)
+             | (contextCount - count) | ((contextIndex + contextCount) - (index + count))
+             | (chars.length - (contextIndex + contextCount))
+             | (advances == null ? 0 : (advances.length - (advancesIndex + count)))) < 0)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        if (count == 0) return 0;
+
+        float[] widths = new float[count];
+        getTextWidths(chars, index, count, widths);
+
+        float total = 0;
+        for (int offset = 0; offset < count; offset++)
+        {
+            total += widths[offset];
+            if (advances != null) advances[advancesIndex + offset] = widths[offset];
+        }
+
+        return total;
+    }
+
+    public int getTextRunCursor(char[] text, int contextStart, int contextLength, boolean isRtl, int offset, int cursorOpt)
+    {
+        int contextEnd = contextStart + contextLength;
+        if (((contextStart | contextEnd | offset | (contextEnd - contextStart) | (offset - contextStart) | (contextEnd - offset)
+              | (text.length - contextEnd) | cursorOpt) < 0) || cursorOpt > CURSOR_AT)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        return runCursor(new String(text, contextStart, contextLength), offset - contextStart, cursorOpt, contextStart);
+    }
+
+    public int getTextRunCursor(CharSequence text, int contextStart, int contextEnd, boolean isRtl, int offset, int cursorOpt)
+    {
+        if (((contextStart | contextEnd | offset | (contextEnd - contextStart) | (offset - contextStart) | (contextEnd - offset)
+              | (text.length() - contextEnd) | cursorOpt) < 0) || cursorOpt > CURSOR_AT)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        return runCursor(text.subSequence(contextStart, contextEnd).toString(), offset - contextStart, cursorOpt, contextStart);
+    }
+
+    private static boolean isCursorBoundary(String text, int position)
+    {
+        if (position <= 0 || position >= text.length()) return true;
+
+        return !(Character.isHighSurrogate(text.charAt(position - 1)) && Character.isLowSurrogate(text.charAt(position)));
+    }
+
+    private static int runCursor(String text, int offset, int cursorOpt, int base)
+    {
+        int length = text.length();
+
+        switch (cursorOpt)
+        {
+            case CURSOR_AT:
+                return isCursorBoundary(text, offset) ? offset + base : -1;
+            case CURSOR_AT_OR_AFTER:
+                if (isCursorBoundary(text, offset)) return offset + base;
+                return Math.min(length, offset + 1) + base;
+            case CURSOR_AT_OR_BEFORE:
+                if (isCursorBoundary(text, offset)) return offset + base;
+                return Math.max(0, offset - 1) + base;
+            case CURSOR_AFTER:
+            {
+                if (offset >= length) return -1;
+                int next = offset + 1;
+                while (next < length && !isCursorBoundary(text, next)) next++;
+                return next + base;
+            }
+            default:
+            {
+                if (offset <= 0) return -1;
+                int previous = offset - 1;
+                while (previous > 0 && !isCursorBoundary(text, previous)) previous--;
+                return previous + base;
+            }
+        }
+    }
+
+    public void getTextPath(char[] text, int index, int count, float x, float y, Path path)
+    {
+        if ((index | count) < 0 || index + count > text.length) throw new ArrayIndexOutOfBoundsException();
+        if (path == null) return;
+
+        path.reset();
+        if (count == 0) return;
+
+        float[] widths = new float[count];
+        getTextWidths(text, index, count, widths);
+
+        float total = 0;
+        for (float width : widths) total += width;
+
+        float cursor = x;
+        if (mTextAlign == Align.CENTER) cursor -= total * 0.5f;
+        else if (mTextAlign == Align.RIGHT) cursor -= total;
+
+        Rect glyph = new Rect();
+        for (int offset = 0; offset < count; offset++)
+        {
+            char character = text[index + offset];
+
+            if (!Character.isWhitespace(character) && !Character.isLowSurrogate(character))
+            {
+                int glyphLength = Character.isHighSurrogate(character) && offset + 1 < count ? 2 : 1;
+                getTextBounds(text, index + offset, glyphLength, glyph);
+
+                if (!glyph.isEmpty())
+                {
+                    path.addRect(cursor + glyph.left, y + glyph.top, cursor + glyph.right, y + glyph.bottom, Path.Direction.CW);
+                }
+            }
+
+            cursor += widths[offset];
+        }
+    }
+
+    public void getTextPath(String text, int start, int end, float x, float y, Path path)
+    {
+        if ((start | end | (end - start) | (text.length() - end)) < 0) throw new IndexOutOfBoundsException();
+
+        getTextPath(text.toCharArray(), start, end - start, x, y, path);
+    }
+
+    public float getRunAdvance(CharSequence text, int start, int end, int contextStart, int contextEnd, boolean isRtl, int offset)
+    {
+        if (text == null) throw new IllegalArgumentException("text cannot be null");
+        if ((contextStart | start | offset | end | contextEnd | (start - contextStart) | (offset - start) | (end - offset)
+             | (contextEnd - end) | (text.length() - contextEnd)) < 0)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        if (end == start) return 0.0f;
+
+        return measureText(text, start, offset);
+    }
+
+    public float getRunCharacterAdvance(char[] text, int start, int end, int contextStart, int contextEnd, boolean isRtl,
+                                        int offset, float[] advances, int advancesIndex)
+    {
+        if (text == null) throw new IllegalArgumentException("text cannot be null");
+        if ((contextStart | start | offset | end | contextEnd | (start - contextStart) | (offset - start) | (end - offset)
+             | (contextEnd - end) | (text.length - contextEnd)) < 0)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        if (end == start) return 0.0f;
+
+        float[] widths = new float[end - start];
+        getTextWidths(text, start, end - start, widths);
+
+        if (advances != null)
+        {
+            if (advancesIndex < 0 || advancesIndex + widths.length > advances.length) throw new IndexOutOfBoundsException();
+            System.arraycopy(widths, 0, advances, advancesIndex, widths.length);
+        }
+
+        float total = 0;
+        for (int index = 0; index < offset - start; index++) total += widths[index];
+
+        return total;
+    }
+
+    public float getRunCharacterAdvance(CharSequence text, int start, int end, int contextStart, int contextEnd, boolean isRtl,
+                                        int offset, float[] advances, int advancesIndex)
+    {
+        if (text == null) throw new IllegalArgumentException("text cannot be null");
+        if ((contextStart | contextEnd | (contextEnd - contextStart) | (text.length() - contextEnd)) < 0)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        char[] chars = charsOf(text, contextStart, contextEnd);
+        return getRunCharacterAdvance(chars, start - contextStart, end - contextStart, 0, contextEnd - contextStart, isRtl,
+                                      offset - contextStart, advances, advancesIndex);
+    }
+
+    public int getOffsetForAdvance(char[] text, int start, int end, int contextStart, int contextEnd, boolean isRtl,
+                                   float advance)
+    {
+        if (text == null) throw new IllegalArgumentException("text cannot be null");
+        if ((contextStart | start | end | contextEnd | (start - contextStart) | (end - start) | (contextEnd - end)
+             | (text.length - contextEnd)) < 0)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        if (end == start || advance <= 0) return start;
+
+        float[] widths = new float[end - start];
+        getTextWidths(text, start, end - start, widths);
+
+        float walked = 0;
+        for (int index = 0; index < widths.length; index++)
+        {
+            float next = walked + widths[index];
+
+            if (next >= advance)
+            {
+                int candidate = advance - walked < next - advance ? start + index : start + index + 1;
+                if (candidate > start && candidate < end && Character.isLowSurrogate(text[candidate])) candidate--;
+                return candidate;
+            }
+
+            walked = next;
+        }
+
+        return end;
+    }
+
+    public int getOffsetForAdvance(CharSequence text, int start, int end, int contextStart, int contextEnd, boolean isRtl,
+                                   float advance)
+    {
+        if (text == null) throw new IllegalArgumentException("text cannot be null");
+        if ((contextStart | start | end | contextEnd | (start - contextStart) | (end - start) | (contextEnd - end)
+             | (text.length() - contextEnd)) < 0)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        char[] chars = charsOf(text, contextStart, contextEnd);
+        return getOffsetForAdvance(chars, start - contextStart, end - contextStart, 0, contextEnd - contextStart, isRtl, advance)
+            + contextStart;
     }
 
     public static final int HINTING_OFF = 0;
@@ -225,8 +705,7 @@ public class Paint
     {
         int color = mColor;
 
-        if (mColorFilter instanceof PorterDuffColorFilter) color = ((PorterDuffColorFilter) mColorFilter).apply(color);
-        else if (mColorFilter instanceof BlendModeColorFilter) color = ((BlendModeColorFilter) mColorFilter).apply(color);
+        if (mColorFilter != null) color = mColorFilter.apply(color);
 
         mPaintInts[0] = color;
         mPaintInts[1] = styleOverride >= 0 ? styleOverride : (mStyle == null ? 0 : mStyle.ordinal());
@@ -238,7 +717,7 @@ public class Paint
         mPaintInts[7] = mShader == null ? 0 : mShader.tileModeId();
         mPaintInts[8] = isFilterBitmap() ? 1 : 0;
         mPaintInts[9] = tintColour();
-        mPaintInts[10] = mColorFilter != null ? 1 : 0;
+        mPaintInts[10] = tintsImages() ? 1 : 0;
 
         return mPaintInts;
     }
@@ -276,6 +755,32 @@ public class Paint
     {
         if (mColorFilter instanceof BlendModeColorFilter) return ((BlendModeColorFilter) mColorFilter).getColor();
         if (mColorFilter instanceof PorterDuffColorFilter) return ((PorterDuffColorFilter) mColorFilter).getColor();
+        if (mColorFilter != null) return mColorFilter.imageTint();
+
+        return 0;
+    }
+
+    private boolean tintsImages()
+    {
+        if (mColorFilter instanceof BlendModeColorFilter || mColorFilter instanceof PorterDuffColorFilter) return true;
+
+        return mColorFilter != null && mColorFilter.tintsImages();
+    }
+
+    float[] dashIntervals(PathEffect effect)
+    {
+        if (effect instanceof DashPathEffect) return ((DashPathEffect) effect).intervals();
+        if (effect instanceof ComposePathEffect) return dashIntervals(((ComposePathEffect) effect).dashSource());
+        if (effect instanceof SumPathEffect) return dashIntervals(((SumPathEffect) effect).dashSource());
+
+        return null;
+    }
+
+    float dashPhase(PathEffect effect)
+    {
+        if (effect instanceof DashPathEffect) return ((DashPathEffect) effect).phase();
+        if (effect instanceof ComposePathEffect) return dashPhase(((ComposePathEffect) effect).dashSource());
+        if (effect instanceof SumPathEffect) return dashPhase(((SumPathEffect) effect).dashSource());
 
         return 0;
     }
@@ -292,12 +797,12 @@ public class Paint
 
     float[] dashIntervals()
     {
-        return mPathEffect instanceof DashPathEffect ? ((DashPathEffect) mPathEffect).intervals() : null;
+        return dashIntervals(mPathEffect);
     }
 
     float dashPhase()
     {
-        return mPathEffect instanceof DashPathEffect ? ((DashPathEffect) mPathEffect).phase() : 0;
+        return dashPhase(mPathEffect);
     }
 
     public void reset()
@@ -806,5 +1311,29 @@ public class Paint
         public int descent;
         public int bottom;
         public int leading;
+
+        @Override
+        public String toString()
+        {
+            return "FontMetricsInt: top=" + top + " ascent=" + ascent + " descent=" + descent + " bottom=" + bottom + " leading="
+                + leading;
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (this == other) return true;
+            if (!(other instanceof FontMetricsInt)) return false;
+
+            FontMetricsInt metrics = (FontMetricsInt) other;
+            return top == metrics.top && ascent == metrics.ascent && descent == metrics.descent && bottom == metrics.bottom
+                && leading == metrics.leading;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return java.util.Objects.hash(top, ascent, descent, bottom, leading);
+        }
     }
 }

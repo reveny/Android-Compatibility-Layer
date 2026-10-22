@@ -135,7 +135,7 @@ public final class Activities
         return named;
     }
 
-    public static void start(Intent intent, int requestCode)
+    public static void start(final Intent intent, final int requestCode)
     {
         if (sBaseContext == null)
         {
@@ -143,6 +143,26 @@ public final class Activities
             return;
         }
 
+        android.os.Looper main = android.os.Looper.getMainLooper();
+        if (main == null)
+        {
+            startNow(intent, requestCode);
+            return;
+        }
+
+        final Intent copied = new Intent(intent);
+        new android.os.Handler(main).post(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                startNow(copied, requestCode);
+            }
+        });
+    }
+
+    private static void startNow(final Intent intent, final int requestCode)
+    {
         String otherPackage = targetPackage(intent);
 
         if (otherPackage != null)
@@ -513,7 +533,31 @@ public final class Activities
         return entry != null && entry.finishing;
     }
 
-    public static void finish(Activity activity)
+    public static void finish(final Activity activity)
+    {
+        final Entry pending = entryFor(activity);
+        if (pending == null || pending.finishing) return;
+
+        pending.finishing = true;
+
+        android.os.Looper main = android.os.Looper.getMainLooper();
+        if (main == null)
+        {
+            finishNow(activity);
+            return;
+        }
+
+        new android.os.Handler(main).post(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                finishNow(activity);
+            }
+        });
+    }
+
+    private static void finishNow(Activity activity)
     {
         Entry entry = entryFor(activity);
         if (entry == null) return;

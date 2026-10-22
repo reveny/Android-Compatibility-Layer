@@ -98,6 +98,16 @@ public class Shader
         return positions;
     }
 
+    static int[] argbColors(long[] colors)
+    {
+        if (colors == null) throw new NullPointerException("colors must not be null");
+
+        int[] converted = new int[colors.length];
+        for (int index = 0; index < colors.length; index++) converted[index] = Color.toArgb(colors[index]);
+
+        return converted;
+    }
+
     public enum TileMode
     {
         CLAMP,

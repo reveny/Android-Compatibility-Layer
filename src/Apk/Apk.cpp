@@ -433,7 +433,7 @@ Apk::Result Apk::ParseManifest(void* apkHandle, Manifest& manifest)
             }
             manifest.receivers.push_back(receiver);
         }
-        else if (name == "provider")
+        else if (name == "provider" && depth >= 2 && elementStack[depth - 2] == "application")
         {
             ProviderInfo provider;
             for (int index = 0; index < attributeCount; ++index)
@@ -445,6 +445,8 @@ Apk::Result Apk::ParseManifest(void* apkHandle, Manifest& manifest)
                 if (id == ATTRIBUTE_DIRECT_BOOT_AWARE) provider.directBootAware = AndroidfwXmlAttributeInt(xml, index, 0) != 0;
                 if (id == ATTRIBUTE_GRANT_URI_PERMISSIONS)
                     provider.grantUriPermissions = AndroidfwXmlAttributeInt(xml, index, 0) != 0;
+                if (id == ATTRIBUTE_ENABLED) provider.enabled = AndroidfwXmlAttributeInt(xml, index, 1) != 0;
+                if (id == ATTRIBUTE_PROCESS) provider.process = AttributeString(xml, index);
             }
             manifest.providers.push_back(provider);
         }
@@ -455,12 +457,29 @@ Apk::Result Apk::ParseManifest(void* apkHandle, Manifest& manifest)
             {
                 uint32_t id = AndroidfwXmlAttributeResourceId(xml, index);
                 if (id == ATTRIBUTE_NAME) entry.name = AttributeString(xml, index);
-                if (id == ATTRIBUTE_VALUE) entry.value = AttributeString(xml, index);
+                if (id == ATTRIBUTE_RESOURCE) entry.resource = AttributeReference(xml, index);
+
+                if (id == ATTRIBUTE_VALUE)
+                {
+                    entry.value = AttributeString(xml, index);
+
+                    int32_t type = 0;
+                    uint32_t data = 0;
+                    if (AndroidfwXmlAttributeValue((AndroidfwXml*)xml, index, &type, &data))
+                    {
+                        entry.valueType = type;
+                        entry.valueData = data;
+                    }
+                }
             }
             bool nested = depth >= 2 && depth - 2 < MAX_ELEMENT_DEPTH;
             const std::string& parent = nested ? elementStack[depth - 2] : entry.name;
 
-            if (nested && parent == "provider" && !manifest.providers.empty())
+            if (nested && parent == "application")
+            {
+                manifest.applicationMetaData.push_back(entry);
+            }
+            else if (nested && parent == "provider" && !manifest.providers.empty())
             {
                 manifest.providers.back().metaData.push_back(entry);
             }
@@ -483,6 +502,14 @@ Apk::Result Apk::ParseManifest(void* apkHandle, Manifest& manifest)
             {
                 if (AndroidfwXmlAttributeResourceId(xml, index) != ATTRIBUTE_NAME) continue;
                 manifest.permissions.push_back(AttributeString(xml, index));
+            }
+        }
+        else if (name == "uses-library" && depth >= 2 && elementStack[depth - 2] == "application")
+        {
+            for (int index = 0; index < attributeCount; ++index)
+            {
+                if (AndroidfwXmlAttributeResourceId(xml, index) != ATTRIBUTE_NAME) continue;
+                manifest.usesLibraries.push_back(AttributeString(xml, index));
             }
         }
         else if (name == "action" && inIntentFilter)

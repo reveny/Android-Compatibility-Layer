@@ -426,7 +426,7 @@ AbiBridge::Result AbiBridge::CallGuestFromHost(const GuestState::GuestCaller& ca
 
         if (IsIntegerClass(argument.argumentClass))
         {
-            if (integerCount < UNIVERSAL_INTEGER_SLOTS)
+            if (integerCount < GENERAL_ARGUMENT_REGISTERS)
             {
                 registers.general[integerCount] = raw;
                 integerCount += 1;

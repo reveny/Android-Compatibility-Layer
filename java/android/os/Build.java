@@ -27,6 +27,16 @@ public class Build
     public static final String[] SUPPORTED_ABIS = {"arm64-v8a"};
     public static final String[] SUPPORTED_64_BIT_ABIS = {"arm64-v8a"};
     public static final String[] SUPPORTED_32_BIT_ABIS = {};
+    public static final String CPU_ABI = "arm64-v8a";
+    public static final String CPU_ABI2 = "";
+    public static final String UNKNOWN = "unknown";
+
+    public static java.util.List<Partition> getFingerprintedPartitions()
+    {
+        java.util.List<Partition> partitions = new java.util.ArrayList<>();
+        partitions.add(new Partition(Partition.PARTITION_NAME_SYSTEM, FINGERPRINT, TIME));
+        return partitions;
+    }
 
     public static String getRadioVersion()
     {
@@ -51,6 +61,54 @@ public class Build
         public static final String SECURITY_PATCH = runtime.PlatformConfig.SECURITY_PATCH;
         public static final String BASE_OS = "";
         public static final String SDK = String.valueOf(runtime.PlatformConfig.SDK_INT);
+        public static final int SDK_INT_FULL = runtime.PlatformConfig.SDK_INT * 100000;
+    }
+
+    public static class Partition
+    {
+        public static final String PARTITION_NAME_SYSTEM = "system";
+
+        private final String mName;
+        private final String mFingerprint;
+        private final long mBuildTimeMillis;
+
+        Partition(String name, String fingerprint, long buildTimeMillis)
+        {
+            mName = name;
+            mFingerprint = fingerprint;
+            mBuildTimeMillis = buildTimeMillis;
+        }
+
+        public String getName()
+        {
+            return mName;
+        }
+
+        public String getFingerprint()
+        {
+            return mFingerprint;
+        }
+
+        public long getBuildTimeMillis()
+        {
+            return mBuildTimeMillis;
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if (!(other instanceof Partition)) return false;
+
+            Partition partition = (Partition)other;
+            return mName.equals(partition.mName) && mFingerprint.equals(partition.mFingerprint)
+                && mBuildTimeMillis == partition.mBuildTimeMillis;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return java.util.Objects.hash(mName, mFingerprint, mBuildTimeMillis);
+        }
     }
 
     public static class VERSION_CODES

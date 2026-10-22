@@ -68,19 +68,8 @@ public final class Components
                 filters[at] = filter;
             }
 
-            int metaDataCount = Bootstrap.nativeComponentMetaDataCount(kind, index);
-            android.os.Bundle metaData = null;
-
-            if (metaDataCount > 0)
-            {
-                metaData = new android.os.Bundle();
-
-                for (int entry = 0; entry < metaDataCount; entry++)
-                {
-                    metaData.putString(Bootstrap.nativeComponentMetaDataName(kind, index, entry),
-                                       Bootstrap.nativeComponentMetaDataValue(kind, index, entry));
-                }
-            }
+            android.app.Application application = Bootstrap.getApplication();
+            android.os.Bundle metaData = MetaData.read(application == null ? null : application.getResources(), kind, index);
 
             records.add(new Record(kind, className, filters, metaData));
         }

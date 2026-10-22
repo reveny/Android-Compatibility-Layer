@@ -50,7 +50,24 @@ public interface SurfaceHolder
 
     Canvas lockCanvas(Rect dirty);
 
+    default Canvas lockHardwareCanvas()
+    {
+        throw new IllegalStateException("This SurfaceHolder doesn't support lockHardwareCanvas");
+    }
+
     void unlockCanvasAndPost(Canvas canvas);
+
+    class BadSurfaceTypeException extends RuntimeException
+    {
+        public BadSurfaceTypeException()
+        {
+        }
+
+        public BadSurfaceTypeException(String name)
+        {
+            super(name);
+        }
+    }
 
     Rect getSurfaceFrame();
 

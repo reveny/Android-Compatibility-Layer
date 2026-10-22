@@ -38,4 +38,11 @@ public class TextPaint extends Paint
         underlineColor = from.underlineColor;
         underlineThickness = from.underlineThickness;
     }
+
+    public float getUnderlineThickness()
+    {
+        if (underlineThickness > 0) return underlineThickness;
+
+        return Math.max(1f, getTextSize() / 18f);
+    }
 }

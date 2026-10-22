@@ -959,6 +959,26 @@ static void AddPathIfPresent(std::vector<std::string>& paths, const std::string&
     paths.push_back(path);
 }
 
+static std::string SharedLibraryJar(const std::string& frameworkJar, const std::string& library)
+{
+    size_t slash = frameworkJar.find_last_of('/');
+    if (slash == std::string::npos) return std::string();
+
+    std::string candidate = frameworkJar.substr(0, slash + 1) + library + ".jar";
+    return ArtRuntime::PathExists(candidate) ? candidate : std::string();
+}
+
+static bool UsesSharedLibrary(const Apk::Manifest& manifest, const std::string& library)
+{
+    for (const std::string& declared : manifest.usesLibraries)
+    {
+        if (declared == library) return true;
+    }
+
+    return library == Launcher::APACHE_HTTP_LIBRARY && manifest.targetSdkVersion != 0 &&
+           manifest.targetSdkVersion < Launcher::APACHE_HTTP_IMPLICIT_BEFORE_SDK;
+}
+
 static void AddParentIfRequested(std::vector<std::string>& paths, const char* variable)
 {
     const char* value = Settings::Lookup(variable);
@@ -1064,6 +1084,7 @@ static void IsolateThisProcess(const Launcher::Options& options)
     AddPathIfPresent(isolation.readablePaths, options.hostRoot);
     AddPathIfPresent(isolation.readablePaths, ArtRuntime::ConscryptPrebuiltDirectory(options.hostRoot));
     AddPathIfPresent(isolation.readablePaths, options.frameworkJar);
+    AddPathIfPresent(isolation.readablePaths, SharedLibraryJar(options.frameworkJar, Launcher::APACHE_HTTP_LIBRARY));
     AddPathIfPresent(isolation.readablePaths, options.frameworkResources);
     AddPathIfPresent(isolation.readablePaths, options.apkPath);
 
@@ -1314,7 +1335,8 @@ static void ConfineAfterTranslation(bool executionWasAllowed)
     fprintf(stderr, "[launcher] translation is finished, so the process gave up executing programs\n");
 }
 
-static void ConfineThisProcess(const Launcher::Options& options, const std::string& dataDirectory, bool mayExecutePrograms)
+static void ConfineThisProcess(const Launcher::Options& options, const std::string& dataDirectory, const std::string& libraryDirectory,
+                               bool mayExecutePrograms)
 {
     if (ConfinementDisabled()) return;
 
@@ -1334,8 +1356,10 @@ static void ConfineThisProcess(const Launcher::Options& options, const std::stri
     AddPathIfPresent(policy.readablePaths, options.hostRoot);
     AddPathIfPresent(policy.readablePaths, ArtRuntime::ConscryptPrebuiltDirectory(options.hostRoot));
     AddPathIfPresent(policy.readablePaths, options.frameworkJar);
+    AddPathIfPresent(policy.readablePaths, SharedLibraryJar(options.frameworkJar, Launcher::APACHE_HTTP_LIBRARY));
     AddPathIfPresent(policy.readablePaths, options.frameworkResources);
     AddPathIfPresent(policy.readablePaths, options.apkPath);
+    AddPathIfPresent(policy.readablePaths, libraryDirectory);
 
     for (const std::string& split : options.splitPaths) AddPathIfPresent(policy.readablePaths, split);
 
@@ -2032,11 +2056,19 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
 
     ArtRuntime::Configuration configuration = ArtRuntime::DefaultConfiguration(options.hostRoot);
     configuration.classPath.push_back(options.frameworkJar);
+
+    std::string apacheHttp = SharedLibraryJar(options.frameworkJar, Launcher::APACHE_HTTP_LIBRARY);
+    if (!apacheHttp.empty() && UsesSharedLibrary(package.manifest, Launcher::APACHE_HTTP_LIBRARY))
+    {
+        fprintf(stderr, "[launcher] the app uses %s, so it joins the class path\n", Launcher::APACHE_HTTP_LIBRARY);
+        configuration.classPath.push_back(apacheHttp);
+    }
+
     configuration.classPath.push_back(options.apkPath);
 
     for (const std::string& split : package.splitPaths) configuration.classPath.push_back(split);
     configuration.nativeLibraryPath.insert(configuration.nativeLibraryPath.begin(), libraryDirectory);
-    configuration.checkJni = options.traceJni;
+    configuration.checkJni = options.traceJni || Settings::Tracing("checkjni");
     configuration.reportOptions = options.traceJni;
 
     ArtRuntime::Vm vm;
@@ -2085,7 +2117,10 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
         if (described) fprintf(stderr, "[launcher] the whole process reads an arm64 /proc/cpuinfo and /proc/meminfo\n");
     }
 
-    ConfineThisProcess(options, dataDirectory, mayExecutePrograms);
+    ConfineThisProcess(options, dataDirectory, libraryDirectory, mayExecutePrograms);
+
+    unsetenv("LD_LIBRARY_PATH");
+    unsetenv("LD_PRELOAD");
 
 
 
@@ -2168,6 +2203,8 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
 
         if (options.aheadOfTime) JniBridge::InstallLibraryTranslator(bridge, &TranslateGuestLibrary, &translations);
 
+        JniBridge::InstallRuntimeLoadHook(vm.jniEnv);
+
 #if defined(RUNTIME_HAVE_VULKAN)
         VulkanWsi::Result vulkan = VulkanWsi::RegisterAll(guest);
         if (vulkan != VulkanWsi::Result::Ok)
@@ -2186,6 +2223,7 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
 
         NativeActivity::RegisterWindowFunctions(guest);
         NativeActivity::RegisterAudioFunctions(guest);
+        NativeActivity::RegisterAssetFunctions(guest, package);
         OpenProgressChannel();
         StartShellWatchdog();
 
@@ -2300,9 +2338,10 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
         {
             fprintf(stderr,
                     "[launcher] jit: %llu region(s) covering %llu block(s) compiled at run time, %llu entries ran compiled, %llu "
-                    "region(s) left to the interpreter\n",
+                    "region(s) left to the interpreter, %llu compile(s) discarded by %llu code invalidation(s)\n",
                     (unsigned long long)counters.regionsRecompiled, (unsigned long long)counters.blocksRecompiled,
-                    (unsigned long long)counters.blocksExecutedNative, (unsigned long long)counters.recompileFailures);
+                    (unsigned long long)counters.blocksExecutedNative, (unsigned long long)counters.recompileFailures,
+                    (unsigned long long)counters.recompilesDiscarded, (unsigned long long)counters.codeInvalidations);
         }
 
 #if defined(RUNTIME_HAVE_VULKAN)
@@ -2315,8 +2354,6 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
         }
         const char* pacingReport = Settings::Lookup(Launcher::PACING_REPORT_SETTING);
         if (pacingReport && pacingReport[0] != '\0') VulkanWsi::WritePacingReport(pacingReport);
-
-        VulkanWsi::Shutdown();
 #endif
 
 #if defined(RUNTIME_HAVE_GLES)
@@ -2326,20 +2363,9 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
             fprintf(stderr, "[launcher] the host driver swapped %llu guest frame(s) and made %llu window surface(s) for OpenGL ES\n",
                     (unsigned long long)glesCounters.framesPresented, (unsigned long long)glesCounters.surfacesCreated);
         }
-
-        GlesWsi::Shutdown();
 #endif
-
-        JniBridge::Destroy(bridge);
-        GuestRuntime::Destroy(guest);
-
-        for (AheadOfTime::Image& translated : translations.images) AheadOfTime::Release(translated);
     }
 
-    ArtRuntime::Stop(vm);
-    NativeActivity::RemoveJni();
-    FrameworkJni::SetPackage(nullptr);
-    Apk::Close(package);
-
+    fprintf(stderr, "[launcher] the app's threads may still be running, so the process ends here instead of unloading what they use\n");
     return result;
 }

@@ -6,6 +6,9 @@ import android.graphics.Canvas;
 public class DecorView extends ViewGroup
 {
     private final ViewGroup mContentParent;
+    private Window mWindow;
+    private View mActionBarView;
+    private android.graphics.Insets mBarInsets = android.graphics.Insets.NONE;
 
     public DecorView(Context context)
     {
@@ -16,9 +19,51 @@ public class DecorView extends ViewGroup
         addView(mContentParent, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
     }
 
+    void attachWindow(Window window)
+    {
+        mWindow = window;
+    }
+
+    public Window getWindow()
+    {
+        return mWindow;
+    }
+
     public ViewGroup getContentParent()
     {
         return mContentParent;
+    }
+
+    public void setActionBarView(View view)
+    {
+        if (mActionBarView == view) return;
+        if (mActionBarView != null) removeView(mActionBarView);
+
+        mActionBarView = view;
+        if (view != null)
+        {
+            if (view.getParent() instanceof ViewGroup) ((ViewGroup)view.getParent()).removeView(view);
+            addView(view, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        }
+
+        applyContentPadding();
+        requestLayout();
+    }
+
+    public View getActionBarView()
+    {
+        return mActionBarView;
+    }
+
+    private boolean hasActionBar()
+    {
+        return mActionBarView != null && mActionBarView.getVisibility() != GONE;
+    }
+
+    private void applyContentPadding()
+    {
+        int top = hasActionBar() ? 0 : mBarInsets.top;
+        mContentParent.setPadding(mBarInsets.left, top, mBarInsets.right, mBarInsets.bottom);
     }
 
     @Override
@@ -26,8 +71,9 @@ public class DecorView extends ViewGroup
     {
         if (insets == null) return WindowInsets.empty();
 
-        android.graphics.Insets bars = insets.getSystemWindowInsets();
-        mContentParent.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+        mBarInsets = insets.getSystemWindowInsets();
+        applyContentPadding();
+        if (mActionBarView != null) mActionBarView.setPadding(mBarInsets.left, 0, mBarInsets.right, 0);
 
         mContentParent.dispatchApplyWindowInsets(insets);
 
@@ -39,17 +85,45 @@ public class DecorView extends ViewGroup
     {
         int width = MeasureSpec.getSize(widthMeasureSpec);
         int height = MeasureSpec.getSize(heightMeasureSpec);
+        boolean exactWidth = MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.EXACTLY;
+        boolean exactHeight = MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY;
+
+        int minimumWidth = Math.min(getMinimumWidth(), width);
+        int measuredWidth = exactWidth ? width : 0;
+        int measuredHeight = exactHeight ? height : 0;
+        int barHeight = 0;
+
+        if (hasActionBar())
+        {
+            int barWidthSpec = exactWidth ? MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY) : widthMeasureSpec;
+            mActionBarView.measure(barWidthSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.AT_MOST));
+            barHeight = mBarInsets.top + mActionBarView.getMeasuredHeight();
+        }
 
         for (int index = 0; index < getChildCount(); index++)
         {
             View child = getChildAt(index);
-            if (child.getVisibility() == GONE) continue;
+            if (child.getVisibility() == GONE || child == mActionBarView) continue;
 
-            child.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-                          MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
+            int contentHeight = Math.max(height - barHeight, 0);
+            int childWidthSpec = exactWidth ? MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY) : widthMeasureSpec;
+            int childHeightSpec = exactHeight ? MeasureSpec.makeMeasureSpec(contentHeight, MeasureSpec.EXACTLY)
+                                              : MeasureSpec.makeMeasureSpec(contentHeight, MeasureSpec.getMode(heightMeasureSpec));
+
+            child.measure(childWidthSpec, childHeightSpec);
+
+            if (!exactWidth && child.getMeasuredWidth() < minimumWidth)
+            {
+                child.measure(MeasureSpec.makeMeasureSpec(minimumWidth, MeasureSpec.EXACTLY), childHeightSpec);
+            }
+
+            if (!exactWidth) measuredWidth = Math.max(measuredWidth, child.getMeasuredWidth());
+            if (!exactHeight) measuredHeight = Math.max(measuredHeight, child.getMeasuredHeight() + barHeight);
         }
 
-        setMeasuredDimension(width, height);
+        if (!exactWidth) measuredWidth = Math.max(measuredWidth, minimumWidth);
+
+        setMeasuredDimension(measuredWidth, measuredHeight);
     }
 
     @Override
@@ -57,12 +131,21 @@ public class DecorView extends ViewGroup
     {
         int width = right - left;
         int height = bottom - top;
+        int contentTop = 0;
+
+        if (hasActionBar())
+        {
+            int barTop = mBarInsets.top;
+            int barBottom = Math.min(barTop + mActionBarView.getMeasuredHeight(), height);
+            mActionBarView.layout(0, barTop, width, barBottom);
+            contentTop = barBottom;
+        }
 
         for (int index = 0; index < getChildCount(); index++)
         {
             View child = getChildAt(index);
-            if (child.getVisibility() == GONE) continue;
-            child.layout(0, 0, width, height);
+            if (child.getVisibility() == GONE || child == mActionBarView) continue;
+            child.layout(0, contentTop, width, height);
         }
     }
 
@@ -76,6 +159,8 @@ public class DecorView extends ViewGroup
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec)
         {
+            int widthMode = MeasureSpec.getMode(widthMeasureSpec);
+            int heightMode = MeasureSpec.getMode(heightMeasureSpec);
             int width = MeasureSpec.getSize(widthMeasureSpec);
             int height = MeasureSpec.getSize(heightMeasureSpec);
 
@@ -85,10 +170,27 @@ public class DecorView extends ViewGroup
             int innerWidth = Math.max(width - horizontal, 0);
             int innerHeight = Math.max(height - vertical, 0);
 
-            measureChildren(MeasureSpec.makeMeasureSpec(innerWidth, MeasureSpec.getMode(widthMeasureSpec)),
-                            MeasureSpec.makeMeasureSpec(innerHeight, MeasureSpec.getMode(heightMeasureSpec)));
+            measureChildren(MeasureSpec.makeMeasureSpec(innerWidth, widthMode), MeasureSpec.makeMeasureSpec(innerHeight, heightMode));
 
-            setMeasuredDimension(width, height);
+            int widest = 0;
+            int tallest = 0;
+
+            for (int index = 0; index < getChildCount(); index++)
+            {
+                View child = getChildAt(index);
+                if (child.getVisibility() == GONE) continue;
+
+                widest = Math.max(widest, child.getMeasuredWidth());
+                tallest = Math.max(tallest, child.getMeasuredHeight());
+            }
+
+            int measuredWidth = widthMode == MeasureSpec.EXACTLY ? width : widest + horizontal;
+            int measuredHeight = heightMode == MeasureSpec.EXACTLY ? height : tallest + vertical;
+
+            if (widthMode == MeasureSpec.AT_MOST) measuredWidth = Math.min(measuredWidth, width);
+            if (heightMode == MeasureSpec.AT_MOST) measuredHeight = Math.min(measuredHeight, height);
+
+            setMeasuredDimension(measuredWidth, measuredHeight);
         }
 
         @Override

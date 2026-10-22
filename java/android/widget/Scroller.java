@@ -10,8 +10,9 @@ public class Scroller
     private static final float INFLEXION = 0.35f;
 
     private final Interpolator mInterpolator;
-    private final float mDeceleration;
+    private final float mBaseDeceleration;
     private final float mPhysicalCoefficient;
+    private float mDeceleration;
 
     private int mMode;
     private static final int MODE_SCROLL = 0;
@@ -52,8 +53,14 @@ public class Scroller
                             ? 1.0f
                             : context.getResources().getDisplayMetrics().density;
 
-        mDeceleration = 386.0878f * 160.0f * density * 0.84f;
+        mBaseDeceleration = 386.0878f * 160.0f * density * 0.84f;
+        mDeceleration = mBaseDeceleration;
         mPhysicalCoefficient = 9.80665f * 39.37f * 160.0f * density * 0.84f;
+    }
+
+    public final void setFriction(float friction)
+    {
+        mDeceleration = mBaseDeceleration * (Math.max(friction, 0.0001f) / ViewConfiguration.getScrollFriction());
     }
 
     public final boolean isFinished()

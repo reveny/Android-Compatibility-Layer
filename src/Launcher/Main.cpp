@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <unistd.h>
 
 #include "Launcher/Launcher.hpp"
 
@@ -39,8 +40,10 @@ int main(int argc, char** argv)
 
         if (!options.verbose) fprintf(stderr, "[acl] run again with --verbose to see what the runtime was doing\n");
 
-        return exitStatus == 0 ? 1 : exitStatus;
+        if (exitStatus == 0) exitStatus = 1;
     }
 
-    return exitStatus;
+    fflush(stdout);
+    fflush(stderr);
+    _exit(exitStatus);
 }

@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <pthread.h>
 #include <setjmp.h>
 #include <stdint.h>
@@ -213,6 +214,83 @@ uint64_t JumpWitness(void)
     return accumulator;
 }
 
+#if defined(__BIONIC__)
+extern const char* _ctype_;
+
+static uint64_t ClassOf(int character)
+{
+    return (uint64_t)(unsigned char)(_ctype_ + 1)[character];
+}
+#else
+static uint64_t ClassOf(int character)
+{
+    uint64_t flags = 0;
+    if (isupper(character)) flags |= 0x01;
+    if (islower(character)) flags |= 0x02;
+    if (isdigit(character)) flags |= 0x04;
+    if (isspace(character)) flags |= 0x08;
+    if (ispunct(character)) flags |= 0x10;
+    if (iscntrl(character)) flags |= 0x20;
+    if (isxdigit(character) && !isdigit(character)) flags |= 0x40;
+    if (character == ' ') flags |= 0x80;
+    return flags;
+}
+#endif
+
+static uint64_t StackCompareWitness(void)
+{
+#if defined(__aarch64__)
+    uint64_t equalToItself = 0;
+    uint64_t differentFromZero = 0;
+
+    __asm__ volatile("mov x9, sp\n"
+                     "cmp sp, x9\n"
+                     "cset %0, eq\n"
+                     "cmp sp, #0\n"
+                     "cset %1, ne\n"
+                     : "=r"(equalToItself), "=r"(differentFromZero)
+                     :
+                     : "x9", "cc");
+
+    return equalToItself * 10 + differentFromZero;
+#else
+    return 11;
+#endif
+}
+
+static uint64_t LiteralLoadWitness(void)
+{
+#if defined(__aarch64__)
+    uint64_t wide = 0;
+    int64_t narrow = 0;
+    double real = 0;
+
+    __asm__ volatile("ldr %0, 1f\n"
+                     "ldrsw %1, 2f\n"
+                     "ldr %d2, 3f\n"
+                     "b 4f\n"
+                     ".p2align 3\n"
+                     "1: .quad 0x1122334455667788\n"
+                     "2: .word 0xfffffff6\n"
+                     ".p2align 3\n"
+                     "3: .double 2.5\n"
+                     "4:\n"
+                     : "=r"(wide), "=r"(narrow), "=w"(real));
+
+    return wide + (uint64_t)narrow + (uint64_t)(real * 4);
+#else
+    return 0x1122334455667788ull - 10 + 10;
+#endif
+}
+
+static uint64_t CharacterClassWitness(void)
+{
+    uint64_t accumulator = 0;
+    for (int character = 0; character < 128; ++character) accumulator = accumulator * 1099511628211ull + ClassOf(character);
+
+    return accumulator;
+}
+
 uint64_t HostCallWitness(void)
 {
     printf("guest: %s %d %.4f %s\n", NAMES[0], 7, 1.5, NAMES[2]);
@@ -231,6 +309,11 @@ uint64_t HostCallWitness(void)
     char scratch[64];
     snprintf(scratch, sizeof(scratch), "%s-%d-%.2f", NAMES[3], 42, 2.25);
     printf("guest: formatted %s\n", scratch);
+
+    printf("guest: classes %llu\n", (unsigned long long)CharacterClassWitness());
+    printf("guest: stack compare %llu\n", (unsigned long long)StackCompareWitness());
+    printf("guest: literal loads %llu\n", (unsigned long long)LiteralLoadWitness());
+    printf("guest: stdin %s\n", stdin != NULL && fileno(stdin) == 0 ? "present" : "absent");
 
     threadCounter = 1000;
 

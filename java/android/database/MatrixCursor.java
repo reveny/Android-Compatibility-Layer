@@ -3,13 +3,10 @@ package android.database;
 import java.util.ArrayList;
 import java.util.List;
 
-public class MatrixCursor implements Cursor
+public class MatrixCursor extends AbstractCursor
 {
     private final String[] mColumns;
     private final List<Object[]> mRows = new ArrayList<>();
-
-    private int mPosition = -1;
-    private boolean mClosed;
 
     public MatrixCursor(String[] columnNames)
     {
@@ -24,10 +21,10 @@ public class MatrixCursor implements Cursor
     public void addRow(Object[] values)
     {
         if (values == null) return;
+        if (values.length != mColumns.length)
+            throw new IllegalArgumentException("columnNames.length = " + mColumns.length + ", columnValues.length = " + values.length);
 
-        Object[] row = new Object[mColumns.length];
-        System.arraycopy(values, 0, row, 0, Math.min(values.length, mColumns.length));
-        mRows.add(row);
+        mRows.add(values.clone());
     }
 
     public void addRow(Iterable<?> values)
@@ -39,9 +36,11 @@ public class MatrixCursor implements Cursor
 
         for (Object value : values)
         {
-            if (index >= mColumns.length) break;
+            if (index >= mColumns.length) throw new IllegalArgumentException("columnValues.size() > columnNames.length");
             row[index++] = value;
         }
+
+        if (index != mColumns.length) throw new IllegalArgumentException("columnValues.size() < columnNames.length");
 
         mRows.add(row);
     }
@@ -51,28 +50,37 @@ public class MatrixCursor implements Cursor
         Object[] row = new Object[mColumns.length];
         mRows.add(row);
 
-        return new RowBuilder(row);
+        return new RowBuilder(row, mColumns);
     }
 
-    public static class RowBuilder
+    public class RowBuilder
     {
         private final Object[] mRow;
+        private final String[] mNames;
         private int mIndex;
 
-        RowBuilder(Object[] row)
+        RowBuilder(Object[] row, String[] names)
         {
             mRow = row;
+            mNames = names;
         }
 
         public RowBuilder add(Object value)
         {
-            if (mIndex < mRow.length) mRow[mIndex++] = value;
+            if (mIndex >= mRow.length) throw new CursorIndexOutOfBoundsException("No more columns left.");
+
+            mRow[mIndex++] = value;
             return this;
         }
 
         public RowBuilder add(String columnName, Object value)
         {
-            return add(value);
+            for (int index = 0; index < mNames.length; index++)
+            {
+                if (mNames[index].equals(columnName)) mRow[index] = value;
+            }
+
+            return this;
         }
     }
 
@@ -83,110 +91,9 @@ public class MatrixCursor implements Cursor
     }
 
     @Override
-    public int getPosition()
-    {
-        return mPosition;
-    }
-
-    @Override
-    public boolean move(int offset)
-    {
-        return moveToPosition(mPosition + offset);
-    }
-
-    @Override
-    public boolean moveToPosition(int position)
-    {
-        if (position < -1 || position > mRows.size()) return false;
-
-        mPosition = position;
-        return position >= 0 && position < mRows.size();
-    }
-
-    @Override
-    public boolean moveToFirst()
-    {
-        return moveToPosition(0);
-    }
-
-    @Override
-    public boolean moveToLast()
-    {
-        return moveToPosition(mRows.size() - 1);
-    }
-
-    @Override
-    public boolean moveToNext()
-    {
-        return moveToPosition(mPosition + 1);
-    }
-
-    @Override
-    public boolean moveToPrevious()
-    {
-        return moveToPosition(mPosition - 1);
-    }
-
-    @Override
-    public boolean isFirst()
-    {
-        return mPosition == 0 && !mRows.isEmpty();
-    }
-
-    @Override
-    public boolean isLast()
-    {
-        return !mRows.isEmpty() && mPosition == mRows.size() - 1;
-    }
-
-    @Override
-    public boolean isBeforeFirst()
-    {
-        return mPosition < 0;
-    }
-
-    @Override
-    public boolean isAfterLast()
-    {
-        return mPosition >= mRows.size();
-    }
-
-    @Override
-    public int getColumnCount()
-    {
-        return mColumns.length;
-    }
-
-    @Override
-    public int getColumnIndex(String columnName)
-    {
-        for (int index = 0; index < mColumns.length; index++)
-        {
-            if (mColumns[index].equals(columnName)) return index;
-        }
-
-        return -1;
-    }
-
-    @Override
-    public int getColumnIndexOrThrow(String columnName)
-    {
-        int index = getColumnIndex(columnName);
-        if (index < 0) throw new IllegalArgumentException("no column named " + columnName);
-
-        return index;
-    }
-
-    @Override
-    public String getColumnName(int columnIndex)
-    {
-        return mColumns[columnIndex];
-    }
-
-    @Override
     public String[] getColumnNames()
     {
-        return mColumns.clone();
+        return mColumns;
     }
 
     @Override
@@ -200,35 +107,50 @@ public class MatrixCursor implements Cursor
     public short getShort(int columnIndex)
     {
         Object value = valueAt(columnIndex);
-        return value instanceof Number ? ((Number)value).shortValue() : 0;
+        if (value == null) return 0;
+        if (value instanceof Number) return ((Number)value).shortValue();
+
+        return Short.parseShort(value.toString());
     }
 
     @Override
     public int getInt(int columnIndex)
     {
         Object value = valueAt(columnIndex);
-        return value instanceof Number ? ((Number)value).intValue() : 0;
+        if (value == null) return 0;
+        if (value instanceof Number) return ((Number)value).intValue();
+
+        return Integer.parseInt(value.toString());
     }
 
     @Override
     public long getLong(int columnIndex)
     {
         Object value = valueAt(columnIndex);
-        return value instanceof Number ? ((Number)value).longValue() : 0L;
+        if (value == null) return 0L;
+        if (value instanceof Number) return ((Number)value).longValue();
+
+        return Long.parseLong(value.toString());
     }
 
     @Override
     public float getFloat(int columnIndex)
     {
         Object value = valueAt(columnIndex);
-        return value instanceof Number ? ((Number)value).floatValue() : 0f;
+        if (value == null) return 0f;
+        if (value instanceof Number) return ((Number)value).floatValue();
+
+        return Float.parseFloat(value.toString());
     }
 
     @Override
     public double getDouble(int columnIndex)
     {
         Object value = valueAt(columnIndex);
-        return value instanceof Number ? ((Number)value).doubleValue() : 0d;
+        if (value == null) return 0d;
+        if (value instanceof Number) return ((Number)value).doubleValue();
+
+        return Double.parseDouble(value.toString());
     }
 
     @Override
@@ -257,23 +179,13 @@ public class MatrixCursor implements Cursor
         return valueAt(columnIndex) == null;
     }
 
-    @Override
-    public boolean isClosed()
-    {
-        return mClosed;
-    }
-
-    @Override
-    public void close()
-    {
-        mClosed = true;
-    }
-
     private Object valueAt(int columnIndex)
     {
-        if (mPosition < 0 || mPosition >= mRows.size()) throw new IllegalStateException("the cursor is not on a row");
-        if (columnIndex < 0 || columnIndex >= mColumns.length) throw new IllegalArgumentException("no column " + columnIndex);
+        if (columnIndex < 0 || columnIndex >= mColumns.length)
+            throw new CursorIndexOutOfBoundsException("Requested column: " + columnIndex + ", # of columns: " + mColumns.length);
+        if (mPos < 0) throw new CursorIndexOutOfBoundsException("Before first row.");
+        if (mPos >= mRows.size()) throw new CursorIndexOutOfBoundsException("After last row.");
 
-        return mRows.get(mPosition)[columnIndex];
+        return mRows.get(mPos)[columnIndex];
     }
 }

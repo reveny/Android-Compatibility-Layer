@@ -72,6 +72,65 @@ public final class LocaleList
         return builder.toString();
     }
 
+    public static boolean matchesLanguageAndScript(Locale supported, Locale desired)
+    {
+        if (supported == null || desired == null) return false;
+        if (supported.equals(desired)) return true;
+        if (!supported.getLanguage().equals(desired.getLanguage())) return false;
+
+        return likelyScript(supported).equals(likelyScript(desired));
+    }
+
+    private static String likelyScript(Locale locale)
+    {
+        String script = locale.getScript();
+        if (!script.isEmpty()) return script;
+
+        String language = locale.getLanguage();
+        String country = locale.getCountry();
+
+        if ("zh".equals(language))
+        {
+            return "TW".equals(country) || "HK".equals(country) || "MO".equals(country) ? "Hant" : "Hans";
+        }
+        if ("sr".equals(language)) return "Cyrl";
+        if ("ru".equals(language) || "uk".equals(language) || "bg".equals(language) || "be".equals(language)) return "Cyrl";
+        if ("ar".equals(language) || "fa".equals(language) || "ur".equals(language)) return "Arab";
+        if ("ja".equals(language)) return "Jpan";
+        if ("ko".equals(language)) return "Kore";
+        if ("el".equals(language)) return "Grek";
+        if ("he".equals(language) || "iw".equals(language) || "yi".equals(language)) return "Hebr";
+        if ("hi".equals(language) || "mr".equals(language) || "ne".equals(language)) return "Deva";
+        if ("th".equals(language)) return "Thai";
+        return "Latn";
+    }
+
+    public Locale getFirstMatch(String[] supportedLocales)
+    {
+        if (supportedLocales == null || supportedLocales.length == 0) return mList.length == 0 ? null : mList[0];
+
+        Locale[] supported = new Locale[supportedLocales.length];
+        for (int index = 0; index < supportedLocales.length; index++)
+        {
+            supported[index] = Locale.forLanguageTag(supportedLocales[index]);
+        }
+
+        for (Locale desired : mList)
+        {
+            for (Locale candidate : supported)
+            {
+                if (candidate.equals(desired)) return candidate;
+            }
+
+            for (Locale candidate : supported)
+            {
+                if (matchesLanguageAndScript(candidate, desired)) return candidate;
+            }
+        }
+
+        return supported[0];
+    }
+
     public static LocaleList forLanguageTags(String tags)
     {
         if (tags == null || tags.isEmpty()) return EMPTY;

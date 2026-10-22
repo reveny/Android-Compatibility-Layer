@@ -207,6 +207,7 @@
     FORWARD(glIsVertexArray) \
     FORWARD(glLineWidth) \
     FORWARD(glLinkProgram) \
+    FORWARD(glMapBufferRange) \
     FORWARD(glMemoryBarrier) \
     FORWARD(glMemoryBarrierByRegion) \
     FORWARD(glMinSampleShading) \
@@ -385,6 +386,7 @@
     FORWARD(eglMakeCurrent) \
     FORWARD(eglQueryAPI) \
     FORWARD(eglQueryContext) \
+    FORWARD(eglQueryString) \
     FORWARD(eglQuerySurface) \
     FORWARD(eglReleaseTexImage) \
     FORWARD(eglReleaseThread) \

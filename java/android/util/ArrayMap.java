@@ -152,6 +152,11 @@ public final class ArrayMap<K, V> implements Map<K, V>
         return mEntries.remove(key);
     }
 
+    public void putAll(ArrayMap<? extends K, ? extends V> array)
+    {
+        putAll((Map<? extends K, ? extends V>)array);
+    }
+
     public void ensureCapacity(int capacity)
     {
         mOrder.ensureCapacity(capacity);

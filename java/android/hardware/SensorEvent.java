@@ -6,6 +6,7 @@ public class SensorEvent
     public Sensor sensor;
     public int accuracy;
     public long timestamp;
+    public boolean firstEventAfterDiscontinuity;
 
     public SensorEvent(int valueCount)
     {

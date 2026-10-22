@@ -1,7 +1,31 @@
 package android.os;
 
-public final class Message
+public final class Message implements Parcelable
 {
+    public static final Parcelable.Creator<Message> CREATOR = new Parcelable.Creator<Message>()
+    {
+        @Override
+        public Message createFromParcel(Parcel source)
+        {
+            Message message = Message.obtain();
+            message.what = source.readInt();
+            message.arg1 = source.readInt();
+            message.arg2 = source.readInt();
+            message.obj = source.readValue(null);
+            message.when = source.readLong();
+            message.mData = source.readBundle();
+            message.replyTo = Messenger.readMessengerOrNullFromParcel(source);
+            message.sendingUid = source.readInt();
+            return message;
+        }
+
+        @Override
+        public Message[] newArray(int size)
+        {
+            return new Message[size];
+        }
+    };
+
     private static final Object POOL_LOCK = new Object();
     private static final int MAX_POOL_SIZE = 50;
 
@@ -12,6 +36,8 @@ public final class Message
     public int arg1;
     public int arg2;
     public Object obj;
+    public Messenger replyTo;
+    public int sendingUid = -1;
 
     Handler target;
     Runnable callback;
@@ -99,6 +125,9 @@ public final class Message
         message.arg2 = other.arg2;
         message.obj = other.obj;
         message.callback = other.callback;
+        message.replyTo = other.replyTo;
+        message.sendingUid = other.sendingUid;
+        if (other.mData != null) message.mData = new Bundle(other.mData);
         message.setTarget(other.getTarget());
 
         return message;
@@ -174,6 +203,10 @@ public final class Message
         obj = null;
         target = null;
         callback = null;
+        replyTo = null;
+        sendingUid = -1;
+        mData = null;
+        mAsynchronous = false;
         when = 0;
         next = null;
         inUse = true;
@@ -185,6 +218,38 @@ public final class Message
             sPool = this;
             sPoolSize++;
         }
+    }
+
+    public void copyFrom(Message other)
+    {
+        what = other.what;
+        arg1 = other.arg1;
+        arg2 = other.arg2;
+        obj = other.obj;
+        replyTo = other.replyTo;
+        sendingUid = other.sendingUid;
+        mData = other.mData == null ? null : new Bundle(other.mData);
+    }
+
+    @Override
+    public int describeContents()
+    {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(Parcel dest, int flags)
+    {
+        if (callback != null) throw new RuntimeException("Can't marshal callbacks across processes.");
+
+        dest.writeInt(what);
+        dest.writeInt(arg1);
+        dest.writeInt(arg2);
+        dest.writeValue(obj);
+        dest.writeLong(when);
+        dest.writeBundle(mData);
+        Messenger.writeMessengerOrNullToParcel(replyTo, dest);
+        dest.writeInt(sendingUid);
     }
 
     @Override

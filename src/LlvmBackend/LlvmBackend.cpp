@@ -335,6 +335,19 @@ struct FunctionOptimizer
     }
 };
 
+static void DropUnwindTables(llvm::Module& module)
+{
+    for (llvm::Function& function : module)
+    {
+        if (function.isDeclaration()) continue;
+
+        function.addFnAttr(llvm::Attribute::NoUnwind);
+        function.setUWTableKind(llvm::UWTableKind::None);
+    }
+
+    module.setUwtable(llvm::UWTableKind::None);
+}
+
 static void OptimizeFunction(llvm::Function& function, LlvmBackend::Tier tier)
 {
     FunctionOptimizer optimizer(tier);
@@ -2790,7 +2803,10 @@ static bool LowerFunction(Lowering& lowering, const Ir::Function& function)
     llvm::SwitchInst* entrySwitch = builder.CreateSwitch(lowering.function->getArg(3), firstBlock, (unsigned)function.blocks.size());
 
     for (uint64_t index = 0; index < function.blocks.size(); ++index)
+    {
+        if (index != 0 && !function.blocks[index].externalEntry) continue;
         entrySwitch->addCase(builder.getInt32((uint32_t)index), lowering.blockByAddress[(uint64_t)function.blocks[index].guestAddress]);
+    }
 
     for (const Ir::Block& block : function.blocks)
     {
@@ -3659,6 +3675,7 @@ LlvmBackend::Result LlvmBackend::CompileFunction(Session& session, const Ir::Fun
 
     llvm::orc::ResourceTrackerSP tracker = implementation->jit->getMainJITDylib().createResourceTracker();
 
+    DropUnwindTables(*module);
     llvm::orc::ThreadSafeModule safeModule(std::move(module), std::move(context));
     if (llvm::Error added = implementation->jit->addIRModule(tracker, std::move(safeModule)))
     {
@@ -3859,6 +3876,7 @@ LlvmBackend::Result LlvmBackend::EmitJniThunk(Session& session, const JniThunkRe
 
     llvm::orc::ResourceTrackerSP tracker = implementation->jit->getMainJITDylib().createResourceTracker();
 
+    DropUnwindTables(*module);
     llvm::orc::ThreadSafeModule safeModule(std::move(module), std::move(context));
     if (llvm::Error added = implementation->jit->addIRModule(tracker, std::move(safeModule)))
     {

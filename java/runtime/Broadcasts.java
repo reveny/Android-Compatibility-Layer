@@ -55,9 +55,18 @@ public final class Broadcasts
         sHandler = main == null ? null : new Handler(main);
     }
 
+    private static Intent stickyFor(IntentFilter filter)
+    {
+        if (filter.hasAction(Intent.ACTION_BATTERY_CHANGED)) return android.os.BatteryManager.createBatteryChangedIntent();
+        return null;
+    }
+
     public static Intent register(Context context, BroadcastReceiver receiver, IntentFilter filter)
     {
-        if (receiver == null || filter == null) return null;
+        if (filter == null) return null;
+
+        Intent sticky = stickyFor(filter);
+        if (receiver == null) return sticky;
 
         Registration registration = new Registration();
         registration.receiver = receiver;
@@ -69,7 +78,7 @@ public final class Broadcasts
             sRegistered.add(registration);
         }
 
-        return null;
+        return sticky;
     }
 
     public static void unregister(BroadcastReceiver receiver)

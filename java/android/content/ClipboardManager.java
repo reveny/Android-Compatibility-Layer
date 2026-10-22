@@ -3,7 +3,7 @@ package android.content;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ClipboardManager
+public class ClipboardManager extends android.text.ClipboardManager
 {
     private ClipData mPrimary;
     private final List<OnPrimaryClipChangedListener> mListeners = new ArrayList<>();
@@ -28,6 +28,11 @@ public class ClipboardManager
     public boolean hasPrimaryClip()
     {
         return mPrimary != null;
+    }
+
+    public ClipDescription getPrimaryClipDescription()
+    {
+        return mPrimary == null ? null : mPrimary.getDescription();
     }
 
     public void clearPrimaryClip()

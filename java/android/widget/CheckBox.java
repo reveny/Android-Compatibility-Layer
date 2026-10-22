@@ -7,16 +7,27 @@ public class CheckBox extends CompoundButton
 {
     public CheckBox(Context context)
     {
-        super(context);
+        this(context, null);
     }
 
     public CheckBox(Context context, AttributeSet attributes)
     {
-        super(context, attributes);
+        this(context, attributes, ProgressBar.attributeIdentifier(context, "checkboxStyle"));
     }
 
     public CheckBox(Context context, AttributeSet attributes, int defStyleAttr)
     {
-        super(context, attributes, defStyleAttr);
+        this(context, attributes, defStyleAttr, 0);
+    }
+
+    public CheckBox(Context context, AttributeSet attributes, int defStyleAttr, int defStyleRes)
+    {
+        super(context, attributes, defStyleAttr, defStyleRes);
+    }
+
+    @Override
+    public CharSequence getAccessibilityClassName()
+    {
+        return CheckBox.class.getName();
     }
 }

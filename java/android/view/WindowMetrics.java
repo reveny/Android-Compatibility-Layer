@@ -34,4 +34,10 @@ public final class WindowMetrics
     {
         return mDensity;
     }
+
+    @Override
+    public String toString()
+    {
+        return "WindowMetrics{bounds=" + mBounds + ", windowInsets=" + mWindowInsets + ", density=" + mDensity + "}";
+    }
 }

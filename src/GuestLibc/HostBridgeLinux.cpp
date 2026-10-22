@@ -32,8 +32,17 @@
 #include <sys/sendfile.h>
 #include <sys/statvfs.h>
 #include <sys/vfs.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/inotify.h>
+#include <sys/socket.h>
+#include <sys/sysinfo.h>
+#include <sys/uio.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <netdb.h>
 #include <pwd.h>
 #include <unistd.h>
 #include <utime.h>
@@ -1293,7 +1302,7 @@ int32_t HostBridge::OpenFile(const char* path, int32_t flags, int32_t mode)
     const std::string* synthetic = SyntheticSystemFile(path);
     if (synthetic) return OpenSyntheticDescriptor(*synthetic);
 
-    return open(GuestPath(path), flags, (mode_t)mode);
+    return open(GuestPath(path), TranslateOpenFlagsToHost(flags), (mode_t)mode);
 }
 
 int32_t HostBridge::CloseDescriptor(int32_t descriptor)
@@ -1618,6 +1627,34 @@ int32_t HostBridge::ProcessControl(int32_t option, uint64_t first, uint64_t seco
     return prctl(option, (unsigned long)first, (unsigned long)second, (unsigned long)third, 0ul);
 }
 
+static std::atomic<uint64_t> standardStreamBase{0};
+static std::atomic<uint64_t> standardStreamStride{0};
+static constexpr uint64_t STANDARD_STREAM_COUNT = 3;
+
+void HostBridge::SetStandardStreams(uint64_t base, uint64_t stride)
+{
+    standardStreamStride.store(stride, std::memory_order_relaxed);
+    standardStreamBase.store(base, std::memory_order_release);
+}
+
+static FILE* StandardStreamAt(uint64_t address)
+{
+    uint64_t base = standardStreamBase.load(std::memory_order_acquire);
+    uint64_t stride = standardStreamStride.load(std::memory_order_relaxed);
+    if (base == 0 || stride == 0 || address < base || address >= base + STANDARD_STREAM_COUNT * stride) return nullptr;
+
+    uint64_t index = (address - base) / stride;
+    if (index == 0) return stdin;
+    if (index == 1) return stdout;
+    return stderr;
+}
+
+static FILE* AsStream(void* stream)
+{
+    FILE* standard = StandardStreamAt((uint64_t)stream);
+    return standard ? standard : (FILE*)stream;
+}
+
 void* HostBridge::OpenStream(const char* path, const char* mode)
 {
     const std::string* synthetic = SyntheticSystemFile(path);
@@ -1633,77 +1670,80 @@ void* HostBridge::AdoptDescriptor(int32_t descriptor, const char* mode)
 
 int32_t HostBridge::CloseStream(void* stream)
 {
-    return fclose((FILE*)stream);
+    FILE* standard = StandardStreamAt((uint64_t)stream);
+    if (standard) return fflush(standard);
+
+    return fclose(AsStream(stream));
 }
 
 uint64_t HostBridge::ReadStream(void* buffer, uint64_t size, uint64_t count, void* stream)
 {
-    return fread(buffer, (size_t)size, (size_t)count, (FILE*)stream);
+    return fread(buffer, (size_t)size, (size_t)count, AsStream(stream));
 }
 
 uint64_t HostBridge::WriteStream(const void* buffer, uint64_t size, uint64_t count, void* stream)
 {
-    return fwrite(buffer, (size_t)size, (size_t)count, (FILE*)stream);
+    return fwrite(buffer, (size_t)size, (size_t)count, AsStream(stream));
 }
 
 int32_t HostBridge::SeekStream(void* stream, int64_t offset, int32_t origin)
 {
-    return fseeko((FILE*)stream, (off_t)offset, origin);
+    return fseeko(AsStream(stream), (off_t)offset, origin);
 }
 
 int64_t HostBridge::StreamPosition(void* stream)
 {
-    return (int64_t)ftello((FILE*)stream);
+    return (int64_t)ftello(AsStream(stream));
 }
 
 char* HostBridge::ReadStreamLine(char* buffer, int32_t size, void* stream)
 {
-    return fgets(buffer, size, (FILE*)stream);
+    return fgets(buffer, size, AsStream(stream));
 }
 
 int32_t HostBridge::ReadStreamCharacter(void* stream)
 {
-    return fgetc((FILE*)stream);
+    return fgetc(AsStream(stream));
 }
 
 int32_t HostBridge::WriteStreamCharacter(int32_t value, void* stream)
 {
-    return fputc(value, (FILE*)stream);
+    return fputc(value, AsStream(stream));
 }
 
 int32_t HostBridge::WriteStreamText(const char* text, void* stream)
 {
-    return fputs(text, (FILE*)stream);
+    return fputs(text, AsStream(stream));
 }
 
 int32_t HostBridge::StreamAtEnd(void* stream)
 {
-    return feof((FILE*)stream);
+    return feof(AsStream(stream));
 }
 
 int32_t HostBridge::StreamHasError(void* stream)
 {
-    return ferror((FILE*)stream);
+    return ferror(AsStream(stream));
 }
 
 void HostBridge::ClearStreamError(void* stream)
 {
-    clearerr((FILE*)stream);
+    clearerr(AsStream(stream));
 }
 
 int32_t HostBridge::StreamDescriptor(void* stream)
 {
-    return fileno((FILE*)stream);
+    return fileno(AsStream(stream));
 }
 
 void HostBridge::SetStreamBuffer(void* stream, char* buffer)
 {
-    setbuf((FILE*)stream, buffer);
+    setbuf(AsStream(stream), buffer);
 }
 
 int32_t HostBridge::FlushStream(void* stream)
 {
-    return fflush((FILE*)stream);
+    return fflush(AsStream(stream));
 }
 
 int64_t HostBridge::CurrentTime(int64_t* out)
@@ -1811,6 +1851,11 @@ int32_t HostBridge::UserId()
 int32_t HostBridge::EffectiveUserId()
 {
     return (int32_t)geteuid();
+}
+
+int32_t HostBridge::GroupId()
+{
+    return (int32_t)getgid();
 }
 
 int32_t HostBridge::EffectiveGroupId()
@@ -1972,6 +2017,13 @@ int32_t HostBridge::ClearEnvironmentValue(const char* name)
 
 int32_t HostBridge::ControlDescriptor(int32_t descriptor, int32_t command, int64_t argument)
 {
+    if (command == F_SETFL) return fcntl(descriptor, command, (long)TranslateOpenFlagsToHost((int32_t)argument));
+    if (command == F_GETFL)
+    {
+        int produced = fcntl(descriptor, command);
+        return produced < 0 ? produced : TranslateOpenFlagsToGuest(produced);
+    }
+
     return fcntl(descriptor, command, (long)argument);
 }
 
@@ -1987,7 +2039,7 @@ void* HostBridge::ErrorLocation()
 
 int32_t HostBridge::OpenFileAt(int32_t directory, const char* path, int32_t flags, int32_t mode)
 {
-    return openat(directory, GuestPath(path), flags, (mode_t)mode);
+    return openat(directory, GuestPath(path), TranslateOpenFlagsToHost(flags), (mode_t)mode);
 }
 
 int32_t HostBridge::RemovePathAt(int32_t directory, const char* path, int32_t flags)
@@ -2088,22 +2140,22 @@ int32_t HostBridge::PasswordEntryInto(uint32_t user, void* entry, char* buffer, 
 
 int32_t HostBridge::StreamPushBack(int32_t value, void* stream)
 {
-    return ungetc(value, (FILE*)stream);
+    return ungetc(value, AsStream(stream));
 }
 
 int32_t HostBridge::WriteWideCharacter(int32_t value, void* stream)
 {
-    return (int32_t)fputwc((wchar_t)value, (FILE*)stream);
+    return (int32_t)fputwc((wchar_t)value, AsStream(stream));
 }
 
 int32_t HostBridge::ReadWideCharacter(void* stream)
 {
-    return (int32_t)getwc((FILE*)stream);
+    return (int32_t)getwc(AsStream(stream));
 }
 
 int32_t HostBridge::WidePushBack(int32_t value, void* stream)
 {
-    return (int32_t)ungetwc((wint_t)value, (FILE*)stream);
+    return (int32_t)ungetwc((wint_t)value, AsStream(stream));
 }
 
 void HostBridge::MarkDescriptorSet(int32_t descriptor, void* set, uint64_t size)
@@ -2159,4 +2211,717 @@ int32_t HostBridge::Decompress(void* stream, int32_t flush)
 int32_t HostBridge::DecompressEnd(void* stream)
 {
     return inflateEnd((z_streamp)stream);
+}
+
+int32_t HostBridge::DecompressStart(void* stream, const char* version, int32_t size)
+{
+    return inflateInit_((z_streamp)stream, version, size);
+}
+
+int32_t HostBridge::DecompressReset(void* stream)
+{
+    return inflateReset((z_streamp)stream);
+}
+
+int32_t HostBridge::CompressStart(void* stream, int32_t level, const char* version, int32_t size)
+{
+    return deflateInit_((z_streamp)stream, level, version, size);
+}
+
+int32_t HostBridge::CompressStartDetailed(void* stream, int32_t level, int32_t method, int32_t windowBits, int32_t memoryLevel,
+                                          int32_t strategy, const char* version, int32_t size)
+{
+    return deflateInit2_((z_streamp)stream, level, method, windowBits, memoryLevel, strategy, version, size);
+}
+
+int32_t HostBridge::Compress(void* stream, int32_t flush)
+{
+    return deflate((z_streamp)stream, flush);
+}
+
+int32_t HostBridge::CompressEnd(void* stream)
+{
+    return deflateEnd((z_streamp)stream);
+}
+
+int32_t HostBridge::CompressReset(void* stream)
+{
+    return deflateReset((z_streamp)stream);
+}
+
+uint64_t HostBridge::CompressBound(void* stream, uint64_t length)
+{
+    return (uint64_t)deflateBound((z_streamp)stream, (uLong)length);
+}
+
+const char* HostBridge::CompressionErrorText(int32_t code)
+{
+    return zError(code);
+}
+
+uint64_t HostBridge::ChecksumCrc32(uint64_t crc, const void* buffer, uint32_t length)
+{
+    return (uint64_t)crc32((uLong)crc, (const Bytef*)buffer, (uInt)length);
+}
+
+uint64_t HostBridge::ChecksumAdler32(uint64_t adler, const void* buffer, uint32_t length)
+{
+    return (uint64_t)adler32((uLong)adler, (const Bytef*)buffer, (uInt)length);
+}
+
+static constexpr int32_t GUEST_OPEN_DIRECTORY = 0x4000;
+static constexpr int32_t GUEST_OPEN_NO_FOLLOW = 0x8000;
+static constexpr int32_t GUEST_OPEN_DIRECT = 0x10000;
+static constexpr int32_t GUEST_OPEN_LARGE_FILE = 0x20000;
+static constexpr int32_t GUEST_OPEN_DIFFERING_FLAGS = GUEST_OPEN_DIRECTORY | GUEST_OPEN_NO_FOLLOW | GUEST_OPEN_DIRECT | GUEST_OPEN_LARGE_FILE;
+static constexpr int32_t HOST_OPEN_DIFFERING_FLAGS = O_DIRECTORY | O_NOFOLLOW | O_DIRECT | O_LARGEFILE;
+
+int32_t HostBridge::TranslateOpenFlagsToHost(int32_t flags)
+{
+    int32_t translated = flags & ~GUEST_OPEN_DIFFERING_FLAGS;
+
+    if (flags & GUEST_OPEN_DIRECTORY) translated |= O_DIRECTORY;
+    if (flags & GUEST_OPEN_NO_FOLLOW) translated |= O_NOFOLLOW;
+    if (flags & GUEST_OPEN_DIRECT) translated |= O_DIRECT;
+    if (flags & GUEST_OPEN_LARGE_FILE) translated |= O_LARGEFILE;
+
+    return translated;
+}
+
+int32_t HostBridge::TranslateOpenFlagsToGuest(int32_t flags)
+{
+    int32_t translated = flags & ~HOST_OPEN_DIFFERING_FLAGS;
+
+    if (flags & O_DIRECTORY) translated |= GUEST_OPEN_DIRECTORY;
+    if (flags & O_NOFOLLOW) translated |= GUEST_OPEN_NO_FOLLOW;
+    if (flags & O_DIRECT) translated |= GUEST_OPEN_DIRECT;
+    if (flags & O_LARGEFILE) translated |= GUEST_OPEN_LARGE_FILE;
+
+    return translated;
+}
+
+int64_t HostBridge::WriteGathered(int32_t descriptor, const void* vectors, int32_t count)
+{
+    return writev(descriptor, (const struct iovec*)vectors, count);
+}
+
+int64_t HostBridge::ReadScattered(int32_t descriptor, const void* vectors, int32_t count)
+{
+    return readv(descriptor, (const struct iovec*)vectors, count);
+}
+
+int64_t HostBridge::ReadDescriptorAt(int32_t descriptor, void* buffer, uint64_t count, int64_t offset)
+{
+    return pread(descriptor, buffer, (size_t)count, (off_t)offset);
+}
+
+int64_t HostBridge::WriteDescriptorAt(int32_t descriptor, const void* buffer, uint64_t count, int64_t offset)
+{
+    return pwrite(descriptor, buffer, (size_t)count, (off_t)offset);
+}
+
+int32_t HostBridge::SynchronizeDescriptor(int32_t descriptor)
+{
+    return fsync(descriptor);
+}
+
+int32_t HostBridge::SynchronizeDescriptorData(int32_t descriptor)
+{
+    return fdatasync(descriptor);
+}
+
+int32_t HostBridge::ReplaceDescriptor(int32_t descriptor, int32_t target)
+{
+    return dup2(descriptor, target);
+}
+
+int32_t HostBridge::ReplaceDescriptorWithFlags(int32_t descriptor, int32_t target, int32_t flags)
+{
+    return dup3(descriptor, target, TranslateOpenFlagsToHost(flags));
+}
+
+int32_t HostBridge::CreatePipeWithFlags(int32_t* descriptors, int32_t flags)
+{
+    return pipe2(descriptors, TranslateOpenFlagsToHost(flags));
+}
+
+int32_t HostBridge::CreateEventDescriptor(uint32_t initial, int32_t flags)
+{
+    return eventfd(initial, flags);
+}
+
+int32_t HostBridge::CreateTemporaryFile(char* pattern)
+{
+    if (!pattern)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    GuestPath translated(pattern);
+    std::string hostPattern = (const char*)translated;
+
+    int descriptor = mkstemp(hostPattern.data());
+    if (descriptor < 0) return -1;
+
+    size_t guestLength = strlen(pattern);
+    size_t suffixLength = guestLength < hostPattern.size() ? guestLength : hostPattern.size();
+    memcpy(pattern + guestLength - suffixLength, hostPattern.data() + hostPattern.size() - suffixLength, suffixLength);
+
+    return descriptor;
+}
+
+uint32_t HostBridge::ChangeCreationMask(uint32_t mask)
+{
+    return (uint32_t)umask((mode_t)mask);
+}
+
+int32_t HostBridge::AdviseFileAccess(int32_t descriptor, int64_t offset, int64_t length, int32_t advice)
+{
+    return posix_fadvise(descriptor, (off_t)offset, (off_t)length, advice);
+}
+
+int64_t HostBridge::ReadAhead(int32_t descriptor, int64_t offset, uint64_t count)
+{
+    return (int64_t)readahead(descriptor, (off64_t)offset, (size_t)count);
+}
+
+int32_t HostBridge::SynchronizeMemory(void* address, uint64_t length, int32_t flags)
+{
+    if (!GuestOwns((uint64_t)address, length))
+    {
+        RefuseGuestMemoryCall("msync", (uint64_t)address, length);
+        errno = ENOMEM;
+        return -1;
+    }
+
+    return msync(address, (size_t)length, flags);
+}
+
+int32_t HostBridge::LockMemory(const void* address, uint64_t length)
+{
+    if (!GuestOwns((uint64_t)address, length))
+    {
+        RefuseGuestMemoryCall("mlock", (uint64_t)address, length);
+        errno = ENOMEM;
+        return -1;
+    }
+
+    return mlock(address, (size_t)length);
+}
+
+int32_t HostBridge::UnlockMemory(const void* address, uint64_t length)
+{
+    if (!GuestOwns((uint64_t)address, length))
+    {
+        RefuseGuestMemoryCall("munlock", (uint64_t)address, length);
+        errno = ENOMEM;
+        return -1;
+    }
+
+    return munlock(address, (size_t)length);
+}
+
+struct GuestPollEvent
+{
+    uint32_t events;
+    uint32_t padding;
+    uint64_t data;
+};
+
+static constexpr int32_t MAXIMUM_POLL_EVENTS = 4096;
+
+int32_t HostBridge::CreateEventPoll(int32_t flags)
+{
+    return epoll_create1(flags);
+}
+
+int32_t HostBridge::CreateEventPollSized(int32_t size)
+{
+    return epoll_create(size);
+}
+
+int32_t HostBridge::ControlEventPoll(int32_t poll, int32_t operation, int32_t descriptor, void* event)
+{
+    if (!event) return epoll_ctl(poll, operation, descriptor, nullptr);
+
+    const GuestPollEvent* guest = (const GuestPollEvent*)event;
+
+    struct epoll_event host{};
+    host.events = guest->events;
+    host.data.u64 = guest->data;
+
+    return epoll_ctl(poll, operation, descriptor, &host);
+}
+
+static int32_t DeliverPollEvents(const std::vector<struct epoll_event>& host, int32_t produced, void* events)
+{
+    GuestPollEvent* guest = (GuestPollEvent*)events;
+
+    for (int32_t index = 0; index < produced; ++index)
+    {
+        guest[index].events = host[index].events;
+        guest[index].padding = 0;
+        guest[index].data = host[index].data.u64;
+    }
+
+    return produced;
+}
+
+int32_t HostBridge::WaitEventPoll(int32_t poll, void* events, int32_t capacity, int32_t timeout)
+{
+    return WaitEventPollMasked(poll, events, capacity, timeout, nullptr);
+}
+
+int32_t HostBridge::WaitEventPollMasked(int32_t poll, void* events, int32_t capacity, int32_t timeout, const void* mask)
+{
+    if (!events || capacity <= 0 || capacity > MAXIMUM_POLL_EVENTS)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    std::vector<struct epoll_event> host((size_t)capacity);
+
+    int32_t produced = mask ? epoll_pwait(poll, host.data(), capacity, timeout, (const sigset_t*)mask)
+                            : epoll_wait(poll, host.data(), capacity, timeout);
+    if (produced <= 0) return produced;
+
+    return DeliverPollEvents(host, produced, events);
+}
+
+int32_t HostBridge::CreateFileWatch()
+{
+    return inotify_init();
+}
+
+int32_t HostBridge::CreateFileWatchWithFlags(int32_t flags)
+{
+    return inotify_init1(TranslateOpenFlagsToHost(flags));
+}
+
+int32_t HostBridge::AddFileWatch(int32_t descriptor, const char* path, uint32_t mask)
+{
+    return inotify_add_watch(descriptor, GuestPath(path), mask);
+}
+
+int32_t HostBridge::RemoveFileWatch(int32_t descriptor, int32_t watch)
+{
+    return inotify_rm_watch(descriptor, watch);
+}
+
+int32_t HostBridge::ParentProcessId()
+{
+    return (int32_t)getppid();
+}
+
+int32_t HostBridge::WaitForChild(int32_t process, int32_t* status, int32_t options)
+{
+    return (int32_t)waitpid((pid_t)process, status, options);
+}
+
+int32_t HostBridge::WaitForAnyChild(int32_t* status)
+{
+    return (int32_t)waitpid(-1, status, 0);
+}
+
+static constexpr const char* SYNTHETIC_KERNEL_RELEASE = "5.15.148-android14-11";
+static constexpr const char* SYNTHETIC_KERNEL_VERSION = "#1 SMP PREEMPT";
+static constexpr const char* SYNTHETIC_MACHINE = "aarch64";
+static constexpr const char* SYNTHETIC_HOST_NAME = "localhost";
+
+static void CopyField(char* destination, size_t capacity, const char* text)
+{
+    strncpy(destination, text, capacity - 1);
+    destination[capacity - 1] = '\0';
+}
+
+int32_t HostBridge::DescribeSystem(void* out)
+{
+    if (!out)
+    {
+        errno = EFAULT;
+        return -1;
+    }
+
+    struct utsname* described = (struct utsname*)out;
+    memset(described, 0, sizeof(*described));
+
+    CopyField(described->sysname, sizeof(described->sysname), "Linux");
+    CopyField(described->nodename, sizeof(described->nodename), SYNTHETIC_HOST_NAME);
+    CopyField(described->release, sizeof(described->release), SYNTHETIC_KERNEL_RELEASE);
+    CopyField(described->version, sizeof(described->version), SYNTHETIC_KERNEL_VERSION);
+    CopyField(described->machine, sizeof(described->machine), SYNTHETIC_MACHINE);
+    CopyField(described->domainname, sizeof(described->domainname), "localdomain");
+
+    return 0;
+}
+
+int32_t HostBridge::DescribeSystemMemory(void* out)
+{
+    if (!out)
+    {
+        errno = EFAULT;
+        return -1;
+    }
+
+    struct sysinfo* described = (struct sysinfo*)out;
+    if (sysinfo(described) != 0) return -1;
+
+    described->mem_unit = 1;
+    described->totalram = (unsigned long)(SYNTHETIC_MEMORY_KILOBYTES * 1024);
+    described->freeram = described->totalram / 8;
+    described->totalswap = 0;
+    described->freeswap = 0;
+    described->procs = (unsigned short)SYNTHETIC_PROCESSOR_COUNT;
+
+    return 0;
+}
+
+int32_t HostBridge::HostName(char* buffer, uint64_t size)
+{
+    if (!buffer || size == 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (size <= strlen(SYNTHETIC_HOST_NAME))
+    {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+
+    strcpy(buffer, SYNTHETIC_HOST_NAME);
+    return 0;
+}
+
+int32_t HostBridge::ReadResourceLimit(int32_t resource, void* out)
+{
+    return getrlimit((__rlimit_resource_t)resource, (struct rlimit*)out);
+}
+
+int32_t HostBridge::WriteResourceLimit(int32_t resource, const void* limit)
+{
+    struct rlimit current{};
+    if (!limit || getrlimit((__rlimit_resource_t)resource, &current) != 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    const struct rlimit* wanted = (const struct rlimit*)limit;
+    if (wanted->rlim_cur > current.rlim_max && current.rlim_max != RLIM_INFINITY)
+    {
+        errno = EPERM;
+        return -1;
+    }
+
+    return setrlimit((__rlimit_resource_t)resource, wanted);
+}
+
+int32_t HostBridge::ReadResourceUsage(int32_t who, void* out)
+{
+    return getrusage(who, (struct rusage*)out);
+}
+
+uint32_t HostBridge::ScheduleAlarm(uint32_t seconds)
+{
+    return alarm(seconds);
+}
+
+uint32_t HostBridge::SleepSeconds(uint32_t seconds)
+{
+    return sleep(seconds);
+}
+
+static std::mutex programNameMutex;
+static std::string programName = "app_process64";
+
+void HostBridge::SetProgramName(const char* name)
+{
+    if (!name) return;
+
+    std::lock_guard<std::mutex> guard(programNameMutex);
+    programName = name;
+}
+
+const char* HostBridge::ProgramName()
+{
+    std::lock_guard<std::mutex> guard(programNameMutex);
+    return programName.c_str();
+}
+
+int32_t HostBridge::SchedulingPolicy(int32_t process)
+{
+    (void)process;
+    return SCHED_OTHER;
+}
+
+int32_t HostBridge::SchedulingPriorityMinimum(int32_t policy)
+{
+    return sched_get_priority_min(policy);
+}
+
+int32_t HostBridge::SchedulingPriorityMaximum(int32_t policy)
+{
+    return sched_get_priority_max(policy);
+}
+
+int32_t HostBridge::ReadSchedulingParameters(int32_t process, int32_t* priority)
+{
+    (void)process;
+
+    if (!priority)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    *priority = 0;
+    return 0;
+}
+
+int32_t HostBridge::ReadProcessorAffinity(int32_t process, uint64_t size, void* mask)
+{
+    (void)process;
+
+    if (!mask || size == 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    memset(mask, 0, (size_t)size);
+
+    uint8_t* bytes = (uint8_t*)mask;
+    for (int64_t processor = 0; processor < SYNTHETIC_PROCESSOR_COUNT && (uint64_t)(processor / 8) < size; ++processor)
+        bytes[processor / 8] |= (uint8_t)(1u << (processor % 8));
+
+    return 0;
+}
+
+int32_t HostBridge::WriteProcessorAffinity(int32_t process, uint64_t size, const void* mask)
+{
+    (void)process;
+    (void)size;
+
+    if (!mask)
+    {
+        errno = EFAULT;
+        return -1;
+    }
+
+    return 0;
+}
+
+int32_t HostBridge::CurrentProcessor()
+{
+    int processor = sched_getcpu();
+    if (processor < 0) return 0;
+
+    return processor % (int)SYNTHETIC_PROCESSOR_COUNT;
+}
+
+int32_t HostBridge::RandomInteger()
+{
+    return rand();
+}
+
+void HostBridge::SeedRandomInteger(uint32_t seed)
+{
+    srand(seed);
+}
+
+int64_t HostBridge::ParseLongLong(const char* text)
+{
+    return (int64_t)atoll(text);
+}
+
+char* HostBridge::SplitStringShared(char* text, const char* separators)
+{
+    static thread_local char* remaining = nullptr;
+    return strtok_r(text, separators, &remaining);
+}
+
+char* HostBridge::FindSubstringIgnoringCase(const char* text, const char* pattern)
+{
+    return (char*)strcasestr(text, pattern);
+}
+
+char* HostBridge::DescribeSignal(int32_t number)
+{
+    return strsignal(number);
+}
+
+void HostBridge::PrintError(const char* prefix)
+{
+    perror(prefix);
+}
+
+const char* HostBridge::DescribeAddressError(int32_t code)
+{
+    return gai_strerror(code);
+}
+
+int32_t HostBridge::AddressFromTextChecked(const char* text, void* address)
+{
+    return inet_aton(text, (struct in_addr*)address);
+}
+
+void* HostBridge::NextControlMessage(void* message, void* current)
+{
+    return (void*)__cmsg_nxthdr((struct msghdr*)message, (struct cmsghdr*)current);
+}
+
+uint64_t HostBridge::FormatWideTime(void* buffer, uint64_t size, const void* format, const void* parts)
+{
+    return (uint64_t)wcsftime((wchar_t*)buffer, (size_t)size, (const wchar_t*)format, (const struct tm*)parts);
+}
+
+void HostBridge::UpdateTimeZone()
+{
+    tzset();
+}
+
+float HostBridge::SplitExponentNarrow(float value, int32_t* exponent)
+{
+    return frexpf(value, exponent);
+}
+
+double HostBridge::BinaryExponential(double value)
+{
+    return exp2(value);
+}
+
+float HostBridge::HyperbolicSineNarrow(float value)
+{
+    return sinhf(value);
+}
+
+int64_t HostBridge::RoundToLongNarrow(float value)
+{
+    return (int64_t)lrintf(value);
+}
+
+int64_t HostBridge::RoundToLong(double value)
+{
+    return (int64_t)lrint(value);
+}
+
+int32_t HostBridge::BinaryExponentNarrow(float value)
+{
+    return ilogbf(value);
+}
+
+static constexpr int32_t GUEST_CLASS_INFINITE = 0x01;
+static constexpr int32_t GUEST_CLASS_NOT_A_NUMBER = 0x02;
+static constexpr int32_t GUEST_CLASS_NORMAL = 0x04;
+static constexpr int32_t GUEST_CLASS_SUBNORMAL = 0x08;
+static constexpr int32_t GUEST_CLASS_ZERO = 0x10;
+
+static int32_t GuestClassOf(int hostClass)
+{
+    switch (hostClass)
+    {
+        case FP_INFINITE: return GUEST_CLASS_INFINITE;
+        case FP_NAN: return GUEST_CLASS_NOT_A_NUMBER;
+        case FP_NORMAL: return GUEST_CLASS_NORMAL;
+        case FP_SUBNORMAL: return GUEST_CLASS_SUBNORMAL;
+        case FP_ZERO: return GUEST_CLASS_ZERO;
+    }
+
+    return GUEST_CLASS_NORMAL;
+}
+
+int32_t HostBridge::ClassifyDouble(double value)
+{
+    return GuestClassOf(std::fpclassify(value));
+}
+
+int32_t HostBridge::ClassifyNarrow(float value)
+{
+    return GuestClassOf(std::fpclassify(value));
+}
+
+int32_t HostBridge::IsFiniteNarrow(float value)
+{
+    return std::isfinite(value) ? 1 : 0;
+}
+
+int32_t HostBridge::IsFinite(double value)
+{
+    return std::isfinite(value) ? 1 : 0;
+}
+
+int32_t HostBridge::IsNotANumber(double value)
+{
+    return std::isnan(value) ? 1 : 0;
+}
+
+int32_t HostBridge::IsInfinite(double value)
+{
+    if (!std::isinf(value)) return 0;
+
+    return value > 0 ? 1 : -1;
+}
+
+int32_t HostBridge::IsWideAlphabeticAnywhere(int32_t value)
+{
+    return (int32_t)iswalpha((wint_t)value);
+}
+
+int32_t HostBridge::IsWideBlankAnywhere(int32_t value)
+{
+    return (int32_t)iswblank((wint_t)value);
+}
+
+int32_t HostBridge::IsWideControlAnywhere(int32_t value)
+{
+    return (int32_t)iswcntrl((wint_t)value);
+}
+
+int32_t HostBridge::IsWideDigitAnywhere(int32_t value)
+{
+    return (int32_t)iswdigit((wint_t)value);
+}
+
+int32_t HostBridge::IsWideLowerAnywhere(int32_t value)
+{
+    return (int32_t)iswlower((wint_t)value);
+}
+
+int32_t HostBridge::IsWidePrintableAnywhere(int32_t value)
+{
+    return (int32_t)iswprint((wint_t)value);
+}
+
+int32_t HostBridge::IsWidePunctuationAnywhere(int32_t value)
+{
+    return (int32_t)iswpunct((wint_t)value);
+}
+
+int32_t HostBridge::IsWideSpaceAnywhere(int32_t value)
+{
+    return (int32_t)iswspace((wint_t)value);
+}
+
+int32_t HostBridge::IsWideUpperAnywhere(int32_t value)
+{
+    return (int32_t)iswupper((wint_t)value);
+}
+
+int32_t HostBridge::IsWideHexDigitAnywhere(int32_t value)
+{
+    return (int32_t)iswxdigit((wint_t)value);
+}
+
+int32_t HostBridge::IsWideAlphaNumericAnywhere(int32_t value)
+{
+    return (int32_t)iswalnum((wint_t)value);
+}
+
+int32_t HostBridge::IsWideGraphicalAnywhere(int32_t value)
+{
+    return (int32_t)iswgraph((wint_t)value);
 }

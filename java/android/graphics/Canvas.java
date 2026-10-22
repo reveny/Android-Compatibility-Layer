@@ -14,9 +14,101 @@ public class Canvas
     private long mNativeCanvas;
     private int mWidth;
     private int mHeight;
+    private int mScreenDensity;
+    private DrawFilter mDrawFilter;
+
+    public enum EdgeType
+    {
+        BW(0),
+        AA(1);
+
+        final int nativeInt;
+
+        EdgeType(int nativeInt)
+        {
+            this.nativeInt = nativeInt;
+        }
+    }
+
+    public enum VertexMode
+    {
+        TRIANGLES(0),
+        TRIANGLE_STRIP(1),
+        TRIANGLE_FAN(2);
+
+        public final int nativeInt;
+
+        VertexMode(int nativeInt)
+        {
+            this.nativeInt = nativeInt;
+        }
+    }
 
     public Canvas()
     {
+    }
+
+    public long getNativeCanvasWrapper()
+    {
+        return mNativeCanvas;
+    }
+
+    public void setScreenDensity(int density)
+    {
+        mScreenDensity = density;
+    }
+
+    public DrawFilter getDrawFilter()
+    {
+        return mDrawFilter;
+    }
+
+    public void setDrawFilter(DrawFilter filter)
+    {
+        mDrawFilter = filter;
+    }
+
+    private Paint filtered(Paint paint)
+    {
+        return mDrawFilter == null || paint == null ? paint : mDrawFilter.filter(paint);
+    }
+
+    public int save(int saveFlags)
+    {
+        return save();
+    }
+
+    public boolean quickReject(RectF rect, EdgeType type)
+    {
+        return quickReject(rect);
+    }
+
+    public boolean quickReject(Path path, EdgeType type)
+    {
+        return quickReject(path);
+    }
+
+    public boolean quickReject(float left, float top, float right, float bottom, EdgeType type)
+    {
+        return quickReject(left, top, right, bottom);
+    }
+
+    public boolean clipRegion(Region region, Region.Op op)
+    {
+        if (region == null) return false;
+
+        Path boundary = new Path();
+        region.getBoundaryPath(boundary);
+
+        if (op == Region.Op.DIFFERENCE) return clipPath(boundary, Region.Op.DIFFERENCE);
+        if (op == null || op == Region.Op.INTERSECT) return clipPath(boundary, Region.Op.INTERSECT);
+
+        return !isClipEmpty();
+    }
+
+    public boolean clipRegion(Region region)
+    {
+        return clipRegion(region, Region.Op.INTERSECT);
     }
 
     public Canvas(Bitmap bitmap)
@@ -132,7 +224,15 @@ public class Canvas
 
     public boolean quickReject(Path path)
     {
-        return false;
+        if (path == null) return true;
+        if (path.isInverseFillType()) return false;
+
+        RectF bounds = new RectF();
+        path.computeBounds(bounds, true);
+
+        if (path.isEmpty()) return true;
+
+        return quickReject(bounds.left, bounds.top, Math.max(bounds.right, bounds.left + 1), Math.max(bounds.bottom, bounds.top + 1));
     }
 
     public boolean isOpaque()
@@ -310,7 +410,6 @@ public class Canvas
 
         int saved = nativeSaveLayer(mNativeCanvas, Math.round(left), Math.round(top), Math.round(right),
                                     Math.round(bottom), alpha, blend);
-
         if (saved < 0) throw new IllegalStateException("Canvas cannot open another layer");
 
         rememberLayer(saved);
@@ -414,15 +513,371 @@ public class Canvas
         drawColor(Color.argb(alpha, red, green, blue));
     }
 
+    public void drawColor(long color)
+    {
+        drawColor(Color.toArgb(color));
+    }
+
+    public void drawColor(int color, PorterDuff.Mode mode)
+    {
+        drawColor(color, BlendMode.fromPorterDuff(mode));
+    }
+
+    public void drawColor(long color, BlendMode mode)
+    {
+        drawColor(Color.toArgb(color), mode);
+    }
+
+    public void drawColor(int color, BlendMode mode)
+    {
+        if (mode == null || mode == BlendMode.SRC_OVER)
+        {
+            drawColor(color);
+            return;
+        }
+
+        Paint fill = new Paint();
+        fill.setColor(color);
+        fill.setBlendMode(mode);
+        fillVisibleArea(fill);
+    }
+
+    private void fillVisibleArea(Paint paint)
+    {
+        RectF area = new RectF(0, 0, getWidth(), getHeight());
+
+        Matrix inverse = new Matrix();
+        if (getMatrix().invert(inverse)) inverse.mapRect(area);
+
+        drawRect(area, paint);
+    }
+
     public void drawPaint(Paint paint)
     {
-        drawColor(paint.getColor());
+        if (paint == null) return;
+
+        boolean plain = paint.getShader() == null && paint.getColorFilter() == null && paint.getBlendMode() == BlendMode.SRC_OVER;
+
+        if (plain)
+        {
+            drawColor(paint.getColor());
+            return;
+        }
+
+        Paint fill = new Paint(paint);
+        fill.setStyle(Paint.Style.FILL);
+        fill.setMaskFilter(null);
+        fill.setPathEffect(null);
+        fillVisibleArea(fill);
+    }
+
+    public void drawDoubleRoundRect(RectF outer, float outerRx, float outerRy, RectF inner, float innerRx, float innerRy,
+                                    Paint paint)
+    {
+        if (outer == null || inner == null || paint == null) return;
+
+        Path shape = new Path();
+        shape.setFillType(Path.FillType.EVEN_ODD);
+        shape.addRoundRect(outer, outerRx, outerRy, Path.Direction.CW);
+        shape.addRoundRect(inner, innerRx, innerRy, Path.Direction.CCW);
+
+        drawPath(shape, paint);
+    }
+
+    public void drawDoubleRoundRect(RectF outer, float[] outerRadii, RectF inner, float[] innerRadii, Paint paint)
+    {
+        if (outer == null || inner == null || paint == null) return;
+        if (outerRadii == null || innerRadii == null || outerRadii.length != 8 || innerRadii.length != 8)
+        {
+            throw new IllegalArgumentException("Both inner and outer radii arrays must contain exactly 8 values");
+        }
+
+        Path shape = new Path();
+        shape.setFillType(Path.FillType.EVEN_ODD);
+        shape.addRoundRect(outer, outerRadii, Path.Direction.CW);
+        shape.addRoundRect(inner, innerRadii, Path.Direction.CCW);
+
+        drawPath(shape, paint);
+    }
+
+    public void drawPatch(NinePatch patch, Rect destination, Paint paint)
+    {
+        if (patch == null || destination == null) return;
+
+        patch.drawInto(this, destination.left, destination.top, destination.right, destination.bottom, paint);
+    }
+
+    public void drawPatch(NinePatch patch, RectF destination, Paint paint)
+    {
+        if (patch == null || destination == null) return;
+
+        patch.drawInto(this, destination.left, destination.top, destination.right, destination.bottom, paint);
+    }
+
+    public void drawBitmap(int[] colors, int offset, int stride, float x, float y, int width, int height, boolean hasAlpha,
+                           Paint paint)
+    {
+        if (width < 0) throw new IllegalArgumentException("width must be >= 0");
+        if (height < 0) throw new IllegalArgumentException("height must be >= 0");
+        if (Math.abs(stride) < width) throw new IllegalArgumentException("abs(stride) must be >= width");
+
+        int lastScanline = offset + (height - 1) * stride;
+        int length = colors.length;
+
+        if (offset < 0 || (offset + width > length) || lastScanline < 0 || (lastScanline + width > length))
+        {
+            throw new ArrayIndexOutOfBoundsException();
+        }
+
+        if (width == 0 || height == 0) return;
+
+        Bitmap pixels = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888, hasAlpha);
+        pixels.setPixels(colors, offset, stride, 0, 0, width, height);
+
+        drawBitmap(pixels, x, y, paint);
+    }
+
+    public void drawBitmap(int[] colors, int offset, int stride, int x, int y, int width, int height, boolean hasAlpha,
+                           Paint paint)
+    {
+        drawBitmap(colors, offset, stride, (float) x, (float) y, width, height, hasAlpha, paint);
+    }
+
+    public void drawBitmapMesh(Bitmap bitmap, int meshWidth, int meshHeight, float[] verts, int vertOffset, int[] colors,
+                               int colorOffset, Paint paint)
+    {
+        if ((meshWidth | meshHeight | vertOffset | colorOffset) < 0) throw new ArrayIndexOutOfBoundsException();
+        if (bitmap == null || meshWidth == 0 || meshHeight == 0) return;
+
+        int count = (meshWidth + 1) * (meshHeight + 1);
+        checkArrayRange(verts.length, vertOffset, count * 2);
+        if (colors != null) checkArrayRange(colors.length, colorOffset, count);
+
+        Paint textured = paint == null ? new Paint() : new Paint(paint);
+        textured.setStyle(Paint.Style.FILL);
+        textured.setAntiAlias(false);
+        textured.setShader(new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+
+        float cellWidth = bitmap.getWidth() / (float) meshWidth;
+        float cellHeight = bitmap.getHeight() / (float) meshHeight;
+
+        float[] source = new float[6];
+        float[] destination = new float[6];
+
+        for (int row = 0; row < meshHeight; row++)
+        {
+            for (int column = 0; column < meshWidth; column++)
+            {
+                int topLeft = vertOffset + (row * (meshWidth + 1) + column) * 2;
+                int topRight = topLeft + 2;
+                int bottomLeft = topLeft + (meshWidth + 1) * 2;
+                int bottomRight = bottomLeft + 2;
+
+                float left = column * cellWidth;
+                float top = row * cellHeight;
+                float right = left + cellWidth;
+                float bottom = top + cellHeight;
+
+                setTriangle(source, left, top, right, top, left, bottom);
+                setTriangle(destination, verts[topLeft], verts[topLeft + 1], verts[topRight], verts[topRight + 1],
+                            verts[bottomLeft], verts[bottomLeft + 1]);
+                drawMappedTriangle(source, destination, textured);
+
+                setTriangle(source, right, top, right, bottom, left, bottom);
+                setTriangle(destination, verts[topRight], verts[topRight + 1], verts[bottomRight], verts[bottomRight + 1],
+                            verts[bottomLeft], verts[bottomLeft + 1]);
+                drawMappedTriangle(source, destination, textured);
+            }
+        }
+    }
+
+    public void drawVertices(VertexMode mode, int vertexCount, float[] verts, int vertOffset, float[] texs, int texOffset,
+                             int[] colors, int colorOffset, short[] indices, int indexOffset, int indexCount, Paint paint)
+    {
+        checkArrayRange(verts.length, vertOffset, vertexCount);
+        if (texs != null) checkArrayRange(texs.length, texOffset, vertexCount);
+        if (colors != null) checkArrayRange(colors.length, colorOffset, vertexCount / 2);
+        if (indices != null) checkArrayRange(indices.length, indexOffset, indexCount);
+        if (mode == null || paint == null) return;
+
+        int vertices = vertexCount / 2;
+        int[] order;
+
+        if (indices != null)
+        {
+            order = new int[indexCount];
+            for (int index = 0; index < indexCount; index++) order[index] = indices[indexOffset + index] & 0xFFFF;
+        }
+        else
+        {
+            order = new int[vertices];
+            for (int index = 0; index < vertices; index++) order[index] = index;
+        }
+
+        int triangles;
+        if (mode == VertexMode.TRIANGLES) triangles = order.length / 3;
+        else triangles = Math.max(0, order.length - 2);
+
+        boolean textured = texs != null && paint.getShader() != null;
+
+        Paint fill = new Paint(paint);
+        fill.setStyle(Paint.Style.FILL);
+        fill.setMaskFilter(null);
+        fill.setPathEffect(null);
+        if (!textured) fill.setShader(null);
+
+        float[] source = new float[6];
+        float[] destination = new float[6];
+        int[] corners = new int[3];
+
+        for (int triangle = 0; triangle < triangles; triangle++)
+        {
+            if (mode == VertexMode.TRIANGLES)
+            {
+                corners[0] = order[triangle * 3];
+                corners[1] = order[triangle * 3 + 1];
+                corners[2] = order[triangle * 3 + 2];
+            }
+            else if (mode == VertexMode.TRIANGLE_STRIP)
+            {
+                corners[0] = order[triangle];
+                corners[1] = order[triangle + 1];
+                corners[2] = order[triangle + 2];
+            }
+            else
+            {
+                corners[0] = order[0];
+                corners[1] = order[triangle + 1];
+                corners[2] = order[triangle + 2];
+            }
+
+            if (corners[0] >= vertices || corners[1] >= vertices || corners[2] >= vertices) continue;
+
+            for (int corner = 0; corner < 3; corner++)
+            {
+                destination[corner * 2] = verts[vertOffset + corners[corner] * 2];
+                destination[corner * 2 + 1] = verts[vertOffset + corners[corner] * 2 + 1];
+
+                if (textured)
+                {
+                    source[corner * 2] = texs[texOffset + corners[corner] * 2];
+                    source[corner * 2 + 1] = texs[texOffset + corners[corner] * 2 + 1];
+                }
+            }
+
+            if (colors != null && !textured)
+            {
+                fill.setColor(averageColor(colors[colorOffset + corners[0]], colors[colorOffset + corners[1]],
+                                           colors[colorOffset + corners[2]]));
+            }
+
+            if (textured)
+            {
+                drawMappedTriangle(source, destination, fill);
+                continue;
+            }
+
+            Path shape = new Path();
+            shape.moveTo(destination[0], destination[1]);
+            shape.lineTo(destination[2], destination[3]);
+            shape.lineTo(destination[4], destination[5]);
+            shape.close();
+            drawPath(shape, fill);
+        }
+    }
+
+    public void drawMesh(Mesh mesh, BlendMode blendMode, Paint paint)
+    {
+        if (mesh == null || paint == null) return;
+
+        Path shape = mesh.trianglePath();
+        if (shape == null) return;
+
+        Paint fill = new Paint(paint);
+        fill.setStyle(Paint.Style.FILL);
+        drawPath(shape, fill);
+    }
+
+    private static void checkArrayRange(int length, int offset, int count)
+    {
+        if ((offset | count) < 0 || offset + count > length) throw new ArrayIndexOutOfBoundsException();
+    }
+
+    private static void setTriangle(float[] into, float firstX, float firstY, float secondX, float secondY, float thirdX,
+                                    float thirdY)
+    {
+        into[0] = firstX;
+        into[1] = firstY;
+        into[2] = secondX;
+        into[3] = secondY;
+        into[4] = thirdX;
+        into[5] = thirdY;
+    }
+
+    private static int averageColor(int first, int second, int third)
+    {
+        int alpha = (Color.alpha(first) + Color.alpha(second) + Color.alpha(third)) / 3;
+        int red = (Color.red(first) + Color.red(second) + Color.red(third)) / 3;
+        int green = (Color.green(first) + Color.green(second) + Color.green(third)) / 3;
+        int blue = (Color.blue(first) + Color.blue(second) + Color.blue(third)) / 3;
+
+        return Color.argb(alpha, red, green, blue);
+    }
+
+    private void drawMappedTriangle(float[] source, float[] destination, Paint paint)
+    {
+        float sourceAx = source[2] - source[0];
+        float sourceAy = source[3] - source[1];
+        float sourceBx = source[4] - source[0];
+        float sourceBy = source[5] - source[1];
+
+        float determinant = sourceAx * sourceBy - sourceBx * sourceAy;
+        if (determinant == 0) return;
+
+        float destinationAx = destination[2] - destination[0];
+        float destinationAy = destination[3] - destination[1];
+        float destinationBx = destination[4] - destination[0];
+        float destinationBy = destination[5] - destination[1];
+
+        float inverseA = sourceBy / determinant;
+        float inverseB = -sourceBx / determinant;
+        float inverseC = -sourceAy / determinant;
+        float inverseD = sourceAx / determinant;
+
+        float scaleX = destinationAx * inverseA + destinationBx * inverseC;
+        float skewX = destinationAx * inverseB + destinationBx * inverseD;
+        float skewY = destinationAy * inverseA + destinationBy * inverseC;
+        float scaleY = destinationAy * inverseB + destinationBy * inverseD;
+
+        float[] values = new float[9];
+        values[Matrix.MSCALE_X] = scaleX;
+        values[Matrix.MSKEW_X] = skewX;
+        values[Matrix.MTRANS_X] = destination[0] - (scaleX * source[0] + skewX * source[1]);
+        values[Matrix.MSKEW_Y] = skewY;
+        values[Matrix.MSCALE_Y] = scaleY;
+        values[Matrix.MTRANS_Y] = destination[1] - (skewY * source[0] + scaleY * source[1]);
+        values[Matrix.MPERSP_2] = 1;
+
+        Matrix mapping = new Matrix();
+        mapping.setValues(values);
+
+        Path shape = new Path();
+        shape.moveTo(source[0], source[1]);
+        shape.lineTo(source[2], source[3]);
+        shape.lineTo(source[4], source[5]);
+        shape.close();
+
+        int saveCount = save();
+        concat(mapping);
+        drawPath(shape, paint);
+        restoreToCount(saveCount);
     }
 
     public void drawPath(Path path, Paint paint)
     {
         if (path == null || paint == null) return;
 
+        paint = filtered(paint);
         sDrawOperations++;
         traceOperation("drawPath", path, paint, -1);
 
@@ -465,6 +920,7 @@ public class Canvas
 
     private void drawScratch(Paint paint, int styleOverride)
     {
+        paint = filtered(paint);
         sDrawOperations++;
         traceOperation("drawShape", mScratchPath, paint, styleOverride);
         nativeDrawPath(mNativeCanvas, scratchPath().nativeHandle(), Path.FillType.WINDING.ordinal(),
@@ -633,7 +1089,7 @@ public class Canvas
         float sourceRight = source == null ? bitmap.getWidth() : source.right;
         float sourceBottom = source == null ? bitmap.getHeight() : source.bottom;
 
-        Paint used = paint == null ? sharedPaint() : paint;
+        Paint used = filtered(paint == null ? sharedPaint() : paint);
 
         if (TRACE_OPS)
         {
@@ -663,6 +1119,33 @@ public class Canvas
         if (mSharedPaint == null) mSharedPaint = new Paint();
 
         return mSharedPaint;
+    }
+
+    public void drawPicture(Picture picture)
+    {
+        if (picture != null) picture.draw(this);
+    }
+
+    public void drawPicture(Picture picture, RectF destination)
+    {
+        if (picture == null || destination == null) return;
+
+        int saveCount = save();
+        translate(destination.left, destination.top);
+
+        if (picture.getWidth() > 0 && picture.getHeight() > 0)
+        {
+            scale(destination.width() / picture.getWidth(), destination.height() / picture.getHeight());
+        }
+
+        clipRect(0, 0, picture.getWidth(), picture.getHeight());
+        picture.draw(this);
+        restoreToCount(saveCount);
+    }
+
+    public void drawPicture(Picture picture, Rect destination)
+    {
+        if (destination != null) drawPicture(picture, new RectF(destination));
     }
 
     public void drawRenderNode(RenderNode node)
@@ -730,17 +1213,231 @@ public class Canvas
         drawText(chars, 0, chars.length, x, y, paint);
     }
 
+    public void drawText(String text, int start, int end, float x, float y, Paint paint)
+    {
+        if (text == null) return;
+        if ((start | end | (end - start) | (text.length() - end)) < 0) throw new IndexOutOfBoundsException();
+        if (end == start) return;
+
+        drawText(text.toCharArray(), start, end - start, x, y, paint);
+    }
+
     public void drawText(char[] text, int index, int count, float x, float y, Paint paint)
     {
         if (text == null || count <= 0 || paint == null) return;
-        nativeDrawTextRun(mNativeCanvas, paint.styleId(), text, index, count, x, y, paint.getColor(), false);
+        drawDecoratedText(text, index, count, x, y, false, paint);
     }
 
     public void drawTextRun(char[] text, int index, int count, int contextIndex, int contextCount, float x, float y,
                             boolean rightToLeft, Paint paint)
     {
         if (text == null || count <= 0 || paint == null) return;
-        nativeDrawTextRun(mNativeCanvas, paint.styleId(), text, index, count, x, y, paint.getColor(), rightToLeft);
+        drawDecoratedText(text, index, count, x, y, rightToLeft, paint);
+    }
+
+    public void drawTextRun(CharSequence text, int start, int end, int contextStart, int contextEnd, float x, float y,
+                            boolean isRtl, Paint paint)
+    {
+        if (text == null) throw new NullPointerException("text is null");
+        if (paint == null) throw new NullPointerException("paint is null");
+        if ((start | end | contextStart | contextEnd | start - contextStart | end - start | contextEnd - end
+             | text.length() - contextEnd) < 0)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        if (end == start) return;
+
+        char[] chars = new char[contextEnd - contextStart];
+        for (int index = contextStart; index < contextEnd; index++) chars[index - contextStart] = text.charAt(index);
+
+        drawTextRun(chars, start - contextStart, end - start, 0, chars.length, x, y, isRtl, paint);
+    }
+
+    public void drawTextRun(android.graphics.text.MeasuredText text, int start, int end, int contextStart, int contextEnd, float x,
+                            float y, boolean isRtl, Paint paint)
+    {
+        if (text == null) throw new NullPointerException("text is null");
+
+        char[] chars = text.getChars();
+        if ((start | end | contextStart | contextEnd | start - contextStart | end - start | contextEnd - end
+             | chars.length - contextEnd) < 0)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+
+        drawTextRun(chars, start, end - start, contextStart, contextEnd - contextStart, x, y, isRtl, paint);
+    }
+
+    public void drawPosText(char[] text, int index, int count, float[] pos, Paint paint)
+    {
+        if (index < 0 || index + count > text.length || count * 2 > pos.length) throw new IndexOutOfBoundsException();
+        if (paint == null) return;
+
+        Paint placed = paint;
+        if (paint.getTextAlign() != Paint.Align.LEFT)
+        {
+            placed = new Paint(paint);
+            placed.setTextAlign(Paint.Align.LEFT);
+        }
+
+        for (int offset = 0; offset < count; offset++)
+        {
+            int length = Character.isHighSurrogate(text[index + offset]) && offset + 1 < count ? 2 : 1;
+            drawText(text, index + offset, length, pos[offset * 2], pos[offset * 2 + 1], placed);
+            offset += length - 1;
+        }
+    }
+
+    public void drawPosText(String text, float[] pos, Paint paint)
+    {
+        drawPosText(text.toCharArray(), 0, text.length(), pos, paint);
+    }
+
+    public void drawTextOnPath(char[] text, int index, int count, Path path, float hOffset, float vOffset, Paint paint)
+    {
+        if (index < 0 || index + count > text.length) throw new ArrayIndexOutOfBoundsException();
+        if (path == null || paint == null || count <= 0) return;
+
+        float[] approximation = path.approximate(0.5f);
+        int points = approximation.length / 3;
+
+        float[] distances = new float[points];
+        float length = 0;
+
+        for (int point = 1; point < points; point++)
+        {
+            if (approximation[point * 3] > approximation[point * 3 - 3])
+            {
+                float dx = approximation[point * 3 + 1] - approximation[point * 3 - 2];
+                float dy = approximation[point * 3 + 2] - approximation[point * 3 - 1];
+                length += (float) Math.sqrt(dx * dx + dy * dy);
+            }
+
+            distances[point] = length;
+        }
+
+        if (length <= 0) return;
+
+        float[] widths = new float[count];
+        paint.getTextWidths(text, index, count, widths);
+
+        float total = 0;
+        for (float width : widths) total += width;
+
+        float cursor = hOffset;
+        if (paint.getTextAlign() == Paint.Align.CENTER) cursor += (length - total) * 0.5f;
+        else if (paint.getTextAlign() == Paint.Align.RIGHT) cursor += length - total;
+
+        Paint placed = new Paint(paint);
+        placed.setTextAlign(Paint.Align.LEFT);
+
+        int segment = 1;
+
+        for (int offset = 0; offset < count; offset++)
+        {
+            int glyphLength = Character.isHighSurrogate(text[index + offset]) && offset + 1 < count ? 2 : 1;
+            float advance = widths[offset] + (glyphLength == 2 ? widths[offset + 1] : 0);
+            float middle = cursor + advance * 0.5f;
+
+            cursor += advance;
+
+            if (middle < 0 || middle > length)
+            {
+                offset += glyphLength - 1;
+                continue;
+            }
+
+            while (segment < points - 1 && (distances[segment] < middle || distances[segment] == distances[segment - 1])) segment++;
+
+            int previous = segment - 1;
+
+            float span = distances[segment] - distances[previous];
+            float ratio = span <= 0 ? 0 : (middle - distances[previous]) / span;
+
+            float startX = approximation[previous * 3 + 1];
+            float startY = approximation[previous * 3 + 2];
+            float endX = approximation[segment * 3 + 1];
+            float endY = approximation[segment * 3 + 2];
+
+            float pointX = startX + (endX - startX) * ratio;
+            float pointY = startY + (endY - startY) * ratio;
+            float degrees = (float) Math.toDegrees(Math.atan2(endY - startY, endX - startX));
+
+            int saveCount = save();
+            translate(pointX, pointY);
+            rotate(degrees);
+            drawText(text, index + offset, glyphLength, -advance * 0.5f, vOffset, placed);
+            restoreToCount(saveCount);
+
+            offset += glyphLength - 1;
+        }
+    }
+
+    public void drawTextOnPath(String text, Path path, float hOffset, float vOffset, Paint paint)
+    {
+        if (text == null || text.isEmpty()) return;
+
+        drawTextOnPath(text.toCharArray(), 0, text.length(), path, hOffset, vOffset, paint);
+    }
+
+    public void drawGlyphs(int[] glyphIds, int glyphIdOffset, float[] positions, int positionOffset, int glyphCount,
+                           android.graphics.fonts.Font font, Paint paint)
+    {
+        if (glyphIds == null || positions == null || font == null || paint == null) throw new NullPointerException();
+        if ((glyphIdOffset | positionOffset | glyphCount) < 0 || glyphIdOffset + glyphCount > glyphIds.length
+            || positionOffset + glyphCount * 2 > positions.length)
+        {
+            throw new IndexOutOfBoundsException();
+        }
+    }
+
+    private void drawDecoratedText(char[] text, int index, int count, float x, float y, boolean rightToLeft, Paint paint)
+    {
+        boolean underline = paint.isUnderlineText();
+        boolean strikeThrough = paint.isStrikeThruText();
+        Paint.Align align = paint.getTextAlign();
+
+        float width = 0;
+        if (underline || strikeThrough || (align != null && align != Paint.Align.LEFT)) width = paint.measureText(text, index, count);
+
+        float originX = x;
+        if (align == Paint.Align.CENTER) originX -= width * 0.5f;
+        else if (align == Paint.Align.RIGHT) originX -= width;
+
+        int style = paint.styleId();
+
+        if (paint.hasShadowLayer())
+        {
+            int shadowColor = paint.getShadowLayerColor();
+            int shadowAlpha = (Color.alpha(shadowColor) * paint.getAlpha()) / 255;
+            shadowColor = (shadowColor & 0x00FFFFFF) | (shadowAlpha << 24);
+
+            nativeDrawTextRun(mNativeCanvas, style, text, index, count, originX + paint.getShadowLayerDx(),
+                              y + paint.getShadowLayerDy(), shadowColor, rightToLeft);
+        }
+
+        nativeDrawTextRun(mNativeCanvas, style, text, index, count, originX, y, paint.getColor(), rightToLeft);
+
+        if (!underline && !strikeThrough) return;
+
+        Paint decoration = new Paint();
+        decoration.setColor(paint.getColor());
+        decoration.setStyle(Paint.Style.FILL);
+        decoration.setColorFilter(paint.getColorFilter());
+
+        if (underline)
+        {
+            float top = y + paint.getUnderlinePosition();
+            drawRect(originX, top, originX + width, top + paint.getUnderlineThickness(), decoration);
+        }
+
+        if (strikeThrough)
+        {
+            float thickness = paint.getStrikeThruThickness();
+            float top = y + paint.getStrikeThruPosition() - thickness * 0.5f;
+            drawRect(originX, top, originX + width, top + thickness, decoration);
+        }
     }
 
     private static native int nativeSave(long nativeCanvas);

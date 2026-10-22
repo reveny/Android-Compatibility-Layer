@@ -1,7 +1,6 @@
 package android.graphics.drawable;
 
 import android.content.res.Resources;
-import android.graphics.Canvas;
 import android.util.AttributeSet;
 import android.util.StateSet;
 
@@ -9,38 +8,33 @@ import java.util.ArrayList;
 
 import org.xmlpull.v1.XmlPullParser;
 
-public class StateListDrawable extends Drawable
+public class StateListDrawable extends DrawableContainer
 {
-    private final ArrayList<Entry> mEntries = new ArrayList<>();
-    private Drawable mCurrent;
+    private StateListState mStateListState;
+    private boolean mMutated;
+
+    public StateListDrawable()
+    {
+        this(null, null);
+    }
+
+    StateListDrawable(StateListState state)
+    {
+        if (state != null) setConstantState(state);
+    }
+
+    private StateListDrawable(StateListState state, Resources resources)
+    {
+        setConstantState(new StateListState(state, this, resources));
+        onStateChange(getState());
+    }
 
     public void addState(int[] stateSet, Drawable drawable)
     {
         if (drawable == null) return;
 
-        mEntries.add(new Entry(stateSet == null ? new int[0] : stateSet, drawable));
-        if (mCurrent == null) select(getState());
-    }
-
-    public int getStateCount()
-    {
-        return mEntries.size();
-    }
-
-    public Drawable getStateDrawable(int index)
-    {
-        return index < 0 || index >= mEntries.size() ? null : mEntries.get(index).drawable;
-    }
-
-    public int[] getStateSet(int index)
-    {
-        return index < 0 || index >= mEntries.size() ? null : mEntries.get(index).stateSet;
-    }
-
-    @Override
-    public Drawable getCurrent()
-    {
-        return mCurrent;
+        mStateListState.addStateSet(stateSet == null ? StateSet.WILD_CARD : stateSet, drawable);
+        onStateChange(getState());
     }
 
     @Override
@@ -50,46 +44,82 @@ public class StateListDrawable extends Drawable
     }
 
     @Override
-    public boolean setState(int[] stateSet)
+    public boolean hasFocusStateSpecified()
     {
-        super.setState(stateSet);
-        return select(stateSet);
+        return mStateListState.hasFocusStateSpecified();
     }
 
-    private boolean select(int[] stateSet)
+    @Override
+    protected boolean onStateChange(int[] stateSet)
     {
-        Drawable wanted = null;
+        boolean changed = super.onStateChange(stateSet);
 
-        for (Entry entry : mEntries)
+        int index = mStateListState.indexOfStateSet(stateSet);
+        if (index < 0) index = mStateListState.indexOfStateSet(StateSet.WILD_CARD);
+
+        return selectDrawable(index) || changed;
+    }
+
+    public int getStateCount()
+    {
+        return mStateListState.getChildCount();
+    }
+
+    public int[] getStateSet(int index)
+    {
+        return index < 0 || index >= mStateListState.getChildCount() ? null : mStateListState.mStateSets[index];
+    }
+
+    public Drawable getStateDrawable(int index)
+    {
+        return mStateListState.getChild(index);
+    }
+
+    public int findStateDrawableIndex(int[] stateSet)
+    {
+        return mStateListState.indexOfStateSet(stateSet);
+    }
+
+    @Override
+    public Drawable mutate()
+    {
+        if (!mMutated && super.mutate() == this)
         {
-            if (!StateSet.stateSetMatches(entry.stateSet, stateSet)) continue;
-
-            wanted = entry.drawable;
-            break;
+            mStateListState.mutate();
+            mMutated = true;
         }
 
-        if (wanted == mCurrent) return false;
-
-        mCurrent = wanted;
-        return true;
+        return this;
     }
 
     @Override
-    public int getIntrinsicWidth()
+    public void applyTheme(Resources.Theme theme)
     {
-        return mCurrent == null ? -1 : mCurrent.getIntrinsicWidth();
+        super.applyTheme(theme);
+        onStateChange(getState());
     }
 
     @Override
-    public int getIntrinsicHeight()
+    protected void setConstantState(DrawableContainerState state)
     {
-        return mCurrent == null ? -1 : mCurrent.getIntrinsicHeight();
+        super.setConstantState(state);
+
+        if (state instanceof StateListState) mStateListState = (StateListState) state;
     }
 
     @Override
-    public void inflate(Resources resources, XmlPullParser parser, AttributeSet attributes) throws java.io.IOException,
-        org.xmlpull.v1.XmlPullParserException
+    public void inflate(Resources resources, XmlPullParser parser, AttributeSet attributes, Resources.Theme theme)
+        throws java.io.IOException, org.xmlpull.v1.XmlPullParserException
     {
+        super.inflate(resources, parser, attributes, theme);
+
+        mStateListState.setVariablePadding(DrawableInflater.flag(attributes, "variablePadding", false));
+        mStateListState.setConstantSize(DrawableInflater.flag(attributes, "constantSize", false));
+        mStateListState.setEnterFadeDuration(DrawableInflater.integer(attributes, "enterFadeDuration", 0));
+        mStateListState.setExitFadeDuration(DrawableInflater.integer(attributes, "exitFadeDuration", 0));
+        setDither(DrawableInflater.flag(attributes, "dither", true));
+        setAutoMirrored(DrawableInflater.flag(attributes, "autoMirrored", false));
+
         int outerDepth = parser.getDepth();
         int event;
 
@@ -103,7 +133,7 @@ public class StateListDrawable extends Drawable
             Drawable drawable = null;
 
             int reference = DrawableInflater.reference(attributes, "drawable", 0);
-            if (reference != 0) drawable = resources.getDrawable(reference);
+            if (reference != 0) drawable = resources.getDrawable(reference, theme);
 
             int itemDepth = parser.getDepth();
             while ((event = parser.next()) != XmlPullParser.END_DOCUMENT)
@@ -111,17 +141,19 @@ public class StateListDrawable extends Drawable
                 if (event == XmlPullParser.END_TAG && parser.getDepth() <= itemDepth) break;
                 if (event != XmlPullParser.START_TAG) continue;
 
-                Drawable child = DrawableInflater.inflate(resources, parser, attributes);
+                Drawable child = DrawableInflater.inflate(resources, parser, attributes, theme);
                 if (child != null) drawable = child;
             }
 
-            if (drawable != null) mEntries.add(new Entry(stateSet, drawable));
+            if (drawable == null) continue;
+
+            mStateListState.addStateSet(stateSet, drawable);
         }
 
-        select(getState());
+        onStateChange(getState());
     }
 
-    private static int[] readStateSet(AttributeSet attributes)
+    static int[] readStateSet(AttributeSet attributes)
     {
         ArrayList<Integer> collected = new ArrayList<>();
 
@@ -154,25 +186,101 @@ public class StateListDrawable extends Drawable
         return "true".equals(value) || "false".equals(value);
     }
 
-    @Override
-    public void draw(Canvas canvas)
+    static class StateListState extends DrawableContainerState
     {
-        if (mCurrent == null) return;
+        private static final int FOCUSED_STATE = 0x0101009c;
 
-        mCurrent.setBounds(getBounds());
-        mCurrent.setAlpha(getAlpha());
-        mCurrent.draw(canvas);
-    }
+        int[][] mStateSets;
 
-    private static final class Entry
-    {
-        final int[] stateSet;
-        final Drawable drawable;
-
-        Entry(int[] stateSet, Drawable drawable)
+        StateListState(StateListState original, StateListDrawable owner, Resources resources)
         {
-            this.stateSet = stateSet;
-            this.drawable = drawable;
+            super(original, owner, resources);
+
+            if (original != null)
+            {
+                mStateSets = new int[mDrawables.length][];
+                for (int index = 0; index < original.mNumChildren && index < original.mStateSets.length; index++)
+                {
+                    mStateSets[index] = original.mStateSets[index];
+                }
+            }
+            else
+            {
+                mStateSets = new int[mDrawables.length][];
+            }
+        }
+
+        void mutate()
+        {
+            int[][] copies = new int[mStateSets.length][];
+
+            for (int index = 0; index < mStateSets.length; index++)
+            {
+                copies[index] = mStateSets[index] == null ? null : mStateSets[index].clone();
+            }
+
+            mStateSets = copies;
+        }
+
+        int addStateSet(int[] stateSet, Drawable drawable)
+        {
+            int position = addChild(drawable);
+            mStateSets[position] = stateSet;
+            return position;
+        }
+
+        int indexOfStateSet(int[] stateSet)
+        {
+            for (int index = 0; index < mNumChildren; index++)
+            {
+                if (StateSet.stateSetMatches(mStateSets[index], stateSet)) return index;
+            }
+
+            return -1;
+        }
+
+        boolean hasFocusStateSpecified()
+        {
+            for (int index = 0; index < mNumChildren; index++)
+            {
+                int[] stateSet = mStateSets[index];
+                if (stateSet == null) continue;
+
+                for (int state : stateSet)
+                {
+                    if (state == FOCUSED_STATE) return true;
+                }
+            }
+
+            return false;
+        }
+
+        @Override
+        public Drawable newDrawable()
+        {
+            return new StateListDrawable(this, null);
+        }
+
+        @Override
+        public Drawable newDrawable(Resources resources)
+        {
+            return new StateListDrawable(this, resources);
+        }
+
+        @Override
+        public boolean canApplyTheme()
+        {
+            return super.canApplyTheme();
+        }
+
+        @Override
+        public void growArray(int oldSize, int newSize)
+        {
+            super.growArray(oldSize, newSize);
+
+            int[][] grown = new int[newSize][];
+            System.arraycopy(mStateSets, 0, grown, 0, Math.min(oldSize, mStateSets.length));
+            mStateSets = grown;
         }
     }
 }

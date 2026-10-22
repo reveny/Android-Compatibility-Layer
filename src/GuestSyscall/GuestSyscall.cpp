@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <fcntl.h>
 #include <linux/futex.h>
 #include <sched.h>
 #include <sys/syscall.h>
@@ -179,6 +180,25 @@ static GuestSyscall::Result GetTimeOfDaySyscall(GuestState::Registers& registers
     return GuestSyscall::Result::Ok;
 }
 
+static constexpr unsigned SYNTHETIC_CPU_COUNT = 8;
+
+static GuestSyscall::Result GetCpuSyscall(GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    int processor = sched_getcpu();
+    uint32_t reported = processor < 0 ? 0 : (uint32_t)processor % SYNTHETIC_CPU_COUNT;
+    uint32_t node = 0;
+
+    if (registers.general[0] != 0 &&
+        !memory.Write(memory.context, (GuestState::GuestAddress)registers.general[0], &reported, sizeof(reported)))
+        return GuestSyscall::Result::GuestMemoryFault;
+
+    if (registers.general[1] != 0 && !memory.Write(memory.context, (GuestState::GuestAddress)registers.general[1], &node, sizeof(node)))
+        return GuestSyscall::Result::GuestMemoryFault;
+
+    registers.general[0] = 0;
+    return GuestSyscall::Result::Ok;
+}
+
 static GuestSyscall::Result AffinitySyscall(GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
 {
     uint64_t requested = registers.general[1];
@@ -262,6 +282,22 @@ GuestSyscall::Result GuestSyscall::Dispatch(GuestState::Registers& registers, co
         case SYSCALL_PROTECT_MEMORY: registers.general[0] = 0; return Result::Ok;
         case SYSCALL_SCHED_GET_AFFINITY: return AffinitySyscall(registers, memory);
         case SYSCALL_SCHED_SET_AFFINITY: return SetAffinitySyscall(registers, memory);
+        case SYSCALL_TRUNCATE_DESCRIPTOR:
+            registers.general[0] = ErrnoResult(ftruncate((int)registers.general[0], (off_t)registers.general[1]));
+            return Result::Ok;
+        case SYSCALL_ALLOCATE_FILE_SPACE:
+            registers.general[0] = ErrnoResult(fallocate((int)registers.general[0], (int)registers.general[1], (off_t)registers.general[2],
+                                                         (off_t)registers.general[3]));
+            return Result::Ok;
+        case SYSCALL_SYNCHRONIZE_DESCRIPTOR: registers.general[0] = ErrnoResult(fsync((int)registers.general[0])); return Result::Ok;
+        case SYSCALL_SYNCHRONIZE_DESCRIPTOR_DATA: registers.general[0] = ErrnoResult(fdatasync((int)registers.general[0])); return Result::Ok;
+        case SYSCALL_GET_CPU: return GetCpuSyscall(registers, memory);
+        case SYSCALL_GET_PARENT_PROCESS_ID: registers.general[0] = (uint64_t)getppid(); return Result::Ok;
+        case SYSCALL_GET_EFFECTIVE_USER_ID: registers.general[0] = (uint64_t)geteuid(); return Result::Ok;
+        case SYSCALL_GET_GROUP_ID: registers.general[0] = (uint64_t)getgid(); return Result::Ok;
+        case SYSCALL_GET_EFFECTIVE_GROUP_ID: registers.general[0] = (uint64_t)getegid(); return Result::Ok;
+        case SYSCALL_READ_OTHER_PROCESS:
+        case SYSCALL_WRITE_OTHER_PROCESS: registers.general[0] = (uint64_t)(-(int64_t)EPERM); return Result::Ok;
         default: break;
     }
 
@@ -312,6 +348,17 @@ const char* GuestSyscall::SyscallName(uint32_t number)
         case SYSCALL_EXIT_GROUP: return "exit_group";
         case SYSCALL_ADVISE_MEMORY: return "madvise";
         case SYSCALL_YIELD: return "sched_yield";
+        case SYSCALL_TRUNCATE_DESCRIPTOR: return "ftruncate";
+        case SYSCALL_ALLOCATE_FILE_SPACE: return "fallocate";
+        case SYSCALL_SYNCHRONIZE_DESCRIPTOR: return "fsync";
+        case SYSCALL_SYNCHRONIZE_DESCRIPTOR_DATA: return "fdatasync";
+        case SYSCALL_GET_CPU: return "getcpu";
+        case SYSCALL_GET_PARENT_PROCESS_ID: return "getppid";
+        case SYSCALL_GET_EFFECTIVE_USER_ID: return "geteuid";
+        case SYSCALL_GET_GROUP_ID: return "getgid";
+        case SYSCALL_GET_EFFECTIVE_GROUP_ID: return "getegid";
+        case SYSCALL_READ_OTHER_PROCESS: return "process_vm_readv";
+        case SYSCALL_WRITE_OTHER_PROCESS: return "process_vm_writev";
         default: break;
     }
 

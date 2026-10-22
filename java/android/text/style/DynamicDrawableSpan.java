@@ -13,7 +13,7 @@ public abstract class DynamicDrawableSpan extends ReplacementSpan
 
     protected final int mVerticalAlignment;
 
-    protected DynamicDrawableSpan()
+    public DynamicDrawableSpan()
     {
         this(ALIGN_BOTTOM);
     }
@@ -67,5 +67,11 @@ public abstract class DynamicDrawableSpan extends ReplacementSpan
         canvas.translate(x, translateY);
         drawable.draw(canvas);
         canvas.restoreToCount(saveCount);
+    }
+
+    @Override
+    public String toString()
+    {
+        return "DynamicDrawableSpan{verticalAlignment=" + mVerticalAlignment + ", drawable=" + getDrawable() + "}";
     }
 }

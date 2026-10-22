@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdarg>
+#include <cstdint>
 #include <memory>
 #include <cstdio>
 #include <cstdlib>
@@ -24,6 +25,8 @@
 #include <signal.h>
 #include <strings.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/random.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -567,6 +570,55 @@ static AbiBridge::Result VsprintfHandler(void*, GuestState::Registers& registers
 static AbiBridge::Result SprintfHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
 {
     return WriteFormattedInto(registers, memory, registers.general[0], GuestLibc::MAX_FORMAT_LENGTH, 2, 1);
+}
+
+static uint64_t CheckedFormatLimit(uint64_t limit, uint64_t capacity)
+{
+    return capacity < limit ? capacity : limit;
+}
+
+static AbiBridge::Result CheckedVsnprintfHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t limit = CheckedFormatLimit(registers.general[1], registers.general[3]);
+    return WriteFormattedInto(registers, memory, registers.general[0], limit, -6, 4);
+}
+
+static AbiBridge::Result CheckedSnprintfHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t limit = CheckedFormatLimit(registers.general[1], registers.general[3]);
+    return WriteFormattedInto(registers, memory, registers.general[0], limit, 5, 4);
+}
+
+static AbiBridge::Result CheckedVsprintfHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t limit = CheckedFormatLimit(GuestLibc::MAX_FORMAT_LENGTH, registers.general[2]);
+    return WriteFormattedInto(registers, memory, registers.general[0], limit, -5, 3);
+}
+
+static AbiBridge::Result CheckedSprintfHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t limit = CheckedFormatLimit(GuestLibc::MAX_FORMAT_LENGTH, registers.general[2]);
+    return WriteFormattedInto(registers, memory, registers.general[0], limit, 4, 3);
+}
+
+static AbiBridge::Result AndroidLogBufferPrintHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    std::string tag;
+    if (!ReadGuestString(memory, registers.general[2], GuestLibc::MAX_FORMAT_LENGTH, tag)) tag = "?";
+
+    std::string output;
+    int produced = 0;
+
+    AbiBridge::Result result = FormatCall(registers, memory, 4, 3, output, produced);
+    if (result != AbiBridge::Result::Ok)
+    {
+        registers.general[0] = (uint64_t)(uint32_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    fprintf(stderr, "[guest %s] %s\n", tag.c_str(), output.c_str());
+    registers.general[0] = (uint64_t)(uint32_t)produced;
+    return AbiBridge::Result::Ok;
 }
 
 static AbiBridge::Result VprintfHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
@@ -1807,6 +1859,157 @@ static void* GuestMemcpyChecked(void* destination, const void* source, size_t le
     return memcpy(destination, source, length);
 }
 
+[[noreturn]] static void GuestFortifyFailure(const char* name, size_t length, size_t capacity)
+{
+    fprintf(stderr, "[guestlibc] %s caught a %zu byte access to an object of %zu bytes\n", name, length, capacity);
+    abort();
+}
+
+static void* GuestMemmoveChecked(void* destination, const void* source, size_t length, size_t capacity)
+{
+    if (length > capacity) GuestFortifyFailure("__memmove_chk", length, capacity);
+
+    return memmove(destination, source, length);
+}
+
+static size_t GuestStrlenChecked(const char* text, size_t capacity)
+{
+    size_t length = strlen(text);
+    if (length >= capacity) GuestFortifyFailure("__strlen_chk", length + 1, capacity);
+
+    return length;
+}
+
+static char* GuestStrchrChecked(const char* text, int character, size_t capacity)
+{
+    (void)capacity;
+    return (char*)strchr(text, character);
+}
+
+static char* GuestStrrchrChecked(const char* text, int character, size_t capacity)
+{
+    (void)capacity;
+    return (char*)strrchr(text, character);
+}
+
+static char* GuestStrncpyChecked(char* destination, const char* source, size_t length, size_t capacity)
+{
+    if (length > capacity) GuestFortifyFailure("__strncpy_chk", length, capacity);
+
+    return strncpy(destination, source, length);
+}
+
+static char* GuestStrncpyCheckedBoth(char* destination, const char* source, size_t length, size_t destinationCapacity,
+                                     size_t sourceCapacity)
+{
+    (void)sourceCapacity;
+    if (length > destinationCapacity) GuestFortifyFailure("__strncpy_chk2", length, destinationCapacity);
+
+    return strncpy(destination, source, length);
+}
+
+static char* GuestStrcpyChecked(char* destination, const char* source, size_t capacity)
+{
+    size_t length = strlen(source) + 1;
+    if (length > capacity) GuestFortifyFailure("__strcpy_chk", length, capacity);
+
+    return (char*)memcpy(destination, source, length);
+}
+
+static char* GuestStpcpyChecked(char* destination, const char* source, size_t capacity)
+{
+    size_t length = strlen(source);
+    if (length + 1 > capacity) GuestFortifyFailure("__stpcpy_chk", length + 1, capacity);
+
+    memcpy(destination, source, length + 1);
+    return destination + length;
+}
+
+static char* GuestStrcatChecked(char* destination, const char* source, size_t capacity)
+{
+    size_t existing = strlen(destination);
+    size_t appended = strlen(source);
+    if (existing + appended + 1 > capacity) GuestFortifyFailure("__strcat_chk", existing + appended + 1, capacity);
+
+    memcpy(destination + existing, source, appended + 1);
+    return destination;
+}
+
+static char* GuestStrncatChecked(char* destination, const char* source, size_t length, size_t capacity)
+{
+    size_t existing = strlen(destination);
+    size_t appended = strnlen(source, length);
+    if (existing + appended + 1 > capacity) GuestFortifyFailure("__strncat_chk", existing + appended + 1, capacity);
+
+    memcpy(destination + existing, source, appended);
+    destination[existing + appended] = '\0';
+    return destination;
+}
+
+static size_t GuestStrlcpyChecked(char* destination, const char* source, size_t size, size_t capacity)
+{
+    if (size > capacity) GuestFortifyFailure("__strlcpy_chk", size, capacity);
+
+    return (size_t)HostBridge::StringCopyTerminated(destination, source, size);
+}
+
+static int64_t GuestReadChecked(int descriptor, void* buffer, size_t count, size_t capacity)
+{
+    if (count > capacity) GuestFortifyFailure("__read_chk", count, capacity);
+
+    return HostBridge::ReadDescriptor(descriptor, buffer, count);
+}
+
+static int64_t GuestWriteChecked(int descriptor, const void* buffer, size_t count, size_t capacity)
+{
+    if (count > capacity) GuestFortifyFailure("__write_chk", count, capacity);
+
+    return HostBridge::WriteDescriptor(descriptor, buffer, count);
+}
+
+static int64_t GuestPreadChecked(int descriptor, void* buffer, size_t count, int64_t offset, size_t capacity)
+{
+    if (count > capacity) GuestFortifyFailure("__pread_chk", count, capacity);
+
+    return HostBridge::ReadDescriptorAt(descriptor, buffer, count, offset);
+}
+
+static int64_t GuestReadlinkChecked(const char* path, char* buffer, size_t size, size_t capacity)
+{
+    if (size > capacity) GuestFortifyFailure("__readlink_chk", size, capacity);
+
+    return HostBridge::ReadLinkTarget(path, buffer, size);
+}
+
+static char* GuestFgetsChecked(char* buffer, int size, void* stream, size_t capacity)
+{
+    if (size > 0 && (size_t)size > capacity) GuestFortifyFailure("__fgets_chk", (size_t)size, capacity);
+
+    return HostBridge::ReadStreamLine(buffer, size, stream);
+}
+
+static size_t GuestFreadChecked(void* buffer, size_t size, size_t count, void* stream, size_t capacity)
+{
+    if (size != 0 && count > capacity / size) GuestFortifyFailure("__fread_chk", size * count, capacity);
+
+    return (size_t)HostBridge::ReadStream(buffer, size, count, stream);
+}
+
+static int GuestOpenChecked(const char* path, int flags)
+{
+    return HostBridge::OpenFile(path, flags, 0);
+}
+
+static int GuestOpenAtChecked(int directory, const char* path, int flags)
+{
+    return HostBridge::OpenFileAt(directory, path, flags, 0);
+}
+
+static uint32_t GuestUmaskChecked(uint32_t mask)
+{
+    return HostBridge::ChangeCreationMask(mask & 0777);
+}
+
 static std::mutex environmentMutex;
 static std::map<std::string, uint64_t> publishedEnvironment;
 static std::map<std::string, std::string> guestEnvironment;
@@ -1822,6 +2025,7 @@ void GuestLibc::DescribeAndroidEnvironment(const std::string& dataDirectory, con
                                            const std::string& packageName)
 {
     HostBridge::MapAndroidTree(dataDirectory.c_str(), externalDirectory.c_str(), ANDROID_SYSTEM_DIRECTORY, packageName.c_str());
+    if (!packageName.empty()) HostBridge::SetProgramName(packageName.c_str());
 
     SetEnvironmentValue("ANDROID_BOOTLOGO", "1");
     SetEnvironmentValue("ANDROID_ROOT", "/system");
@@ -2033,6 +2237,441 @@ static AbiBridge::Result FputcHandler(void* context, GuestState::Registers& regi
     return AbiBridge::Result::Ok;
 }
 
+static AbiBridge::Result PutcharHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    int character = (int)(int32_t)(uint32_t)registers.general[0];
+    registers.general[0] = (uint64_t)(uint32_t)fputc(character, stdout);
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result RewindHandler(void* context, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    GuestRuntime::Instance& instance = *(GuestRuntime::Instance*)context;
+
+    FILE* stream = nullptr;
+    if (HostStreamFor(instance, registers.general[0], stream)) rewind(stream);
+
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result StreamGetPositionHandler(void* context, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    GuestRuntime::Instance& instance = *(GuestRuntime::Instance*)context;
+
+    FILE* stream = nullptr;
+    uint64_t positionOut = registers.general[1];
+    if (positionOut == 0 || !HostStreamFor(instance, registers.general[0], stream))
+    {
+        errno = EINVAL;
+        registers.general[0] = (uint64_t)(int64_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    int64_t position = (int64_t)ftello(stream);
+    if (position < 0)
+    {
+        registers.general[0] = (uint64_t)(int64_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    if (!memory.Write(memory.context, (GuestState::GuestAddress)positionOut, &position, sizeof(position)))
+        return AbiBridge::Result::MalformedArguments;
+
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result StreamSetPositionHandler(void* context, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    GuestRuntime::Instance& instance = *(GuestRuntime::Instance*)context;
+
+    FILE* stream = nullptr;
+    uint64_t positionIn = registers.general[1];
+    if (positionIn == 0 || !HostStreamFor(instance, registers.general[0], stream))
+    {
+        errno = EINVAL;
+        registers.general[0] = (uint64_t)(int64_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    int64_t position = 0;
+    if (!memory.Read(memory.context, (GuestState::GuestAddress)positionIn, &position, sizeof(position)))
+        return AbiBridge::Result::MalformedArguments;
+
+    registers.general[0] = (uint64_t)(int64_t)fseeko(stream, (off_t)position, SEEK_SET);
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result AndroidLogBufferWriteHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    std::string tag;
+    std::string text;
+
+    if (!ReadGuestString(memory, registers.general[2], GuestLibc::MAX_FORMAT_LENGTH, tag)) tag = "?";
+    if (!ReadGuestString(memory, registers.general[3], GuestLibc::MAX_FORMAT_LENGTH, text)) text.clear();
+
+    fprintf(stderr, "[guest %s] %s\n", tag.c_str(), text.c_str());
+    registers.general[0] = (uint64_t)(uint32_t)text.size();
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result LongDivideHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    int64_t numerator = (int64_t)registers.general[0];
+    int64_t denominator = (int64_t)registers.general[1];
+
+    if (denominator == 0 || (denominator == -1 && numerator == INT64_MIN))
+    {
+        registers.general[0] = 0;
+        registers.general[1] = 0;
+        return AbiBridge::Result::Ok;
+    }
+
+    registers.general[0] = (uint64_t)(numerator / denominator);
+    registers.general[1] = (uint64_t)(numerator % denominator);
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result ZeroedIntegerOutHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t valueOut = registers.general[1];
+    int32_t zero = 0;
+
+    if (valueOut != 0 && !memory.Write(memory.context, (GuestState::GuestAddress)valueOut, &zero, sizeof(zero)))
+        return AbiBridge::Result::MalformedArguments;
+
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result ThreadSchedulingHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t policyOut = registers.general[1];
+    uint64_t parameterOut = registers.general[2];
+    int32_t zero = 0;
+
+    if (policyOut != 0 && !memory.Write(memory.context, (GuestState::GuestAddress)policyOut, &zero, sizeof(zero)))
+        return AbiBridge::Result::MalformedArguments;
+
+    if (parameterOut != 0 && !memory.Write(memory.context, (GuestState::GuestAddress)parameterOut, &zero, sizeof(zero)))
+        return AbiBridge::Result::MalformedArguments;
+
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static void FillRandom(void* destination, uint64_t length)
+{
+    uint8_t* cursor = (uint8_t*)destination;
+
+    while (length != 0)
+    {
+        ssize_t got = getrandom(cursor, (size_t)length, 0);
+        if (got <= 0) continue;
+
+        cursor += got;
+        length -= (uint64_t)got;
+    }
+}
+
+static AbiBridge::Result RandomWordHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    uint32_t value = 0;
+    FillRandom(&value, sizeof(value));
+
+    registers.general[0] = value;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result RandomUniformHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    uint32_t upper = (uint32_t)registers.general[0];
+
+    if (upper < 2)
+    {
+        registers.general[0] = 0;
+        return AbiBridge::Result::Ok;
+    }
+
+    uint32_t floor = (0u - upper) % upper;
+    uint32_t value = 0;
+
+    do
+    {
+        FillRandom(&value, sizeof(value));
+    } while (value < floor);
+
+    registers.general[0] = value % upper;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result RandomBufferHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t destination = registers.general[0];
+    uint64_t length = registers.general[1];
+
+    if (destination == 0 || length == 0) return AbiBridge::Result::Ok;
+
+    std::vector<uint8_t> bytes((size_t)length);
+    FillRandom(bytes.data(), length);
+
+    if (!memory.Write(memory.context, (GuestState::GuestAddress)destination, bytes.data(), length)) return AbiBridge::Result::MalformedArguments;
+
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result SignalSetMemberHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    uint64_t address = registers.general[0];
+    int number = (int)(int32_t)(uint32_t)registers.general[1];
+
+    if (address == 0 || number <= 0 || number >= GUEST_SIGNAL_COUNT)
+    {
+        errno = EINVAL;
+        registers.general[0] = (uint64_t)(int64_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    uint64_t bits = 0;
+    if (!memory.Read(memory.context, (GuestState::GuestAddress)address, &bits, sizeof(bits))) return AbiBridge::Result::MalformedArguments;
+
+    registers.general[0] = (bits >> (number - 1)) & 1;
+    return AbiBridge::Result::Ok;
+}
+
+static constexpr uint32_t GUEST_ROUNDING_MASK = 0x00c00000u;
+static constexpr uint32_t GUEST_EXCEPTION_MASK = 0x1fu;
+
+struct GuestFloatingEnvironment
+{
+    uint32_t control;
+    uint32_t status;
+};
+
+static AbiBridge::Result RoundingGetHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    registers.general[0] = registers.floatingPointControl & GUEST_ROUNDING_MASK;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result RoundingSetHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    uint32_t wanted = (uint32_t)registers.general[0];
+    if ((wanted & ~GUEST_ROUNDING_MASK) != 0)
+    {
+        registers.general[0] = (uint64_t)(int64_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    registers.floatingPointControl = (registers.floatingPointControl & ~GUEST_ROUNDING_MASK) | wanted;
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result EnvironmentGetHandler(void* context, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    bool holding = context != nullptr;
+    uint64_t environmentOut = registers.general[0];
+
+    GuestFloatingEnvironment saved{registers.floatingPointControl, registers.floatingPointStatus};
+    if (environmentOut == 0 || !memory.Write(memory.context, (GuestState::GuestAddress)environmentOut, &saved, sizeof(saved)))
+    {
+        registers.general[0] = (uint64_t)(int64_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    if (holding) registers.floatingPointStatus &= ~GUEST_EXCEPTION_MASK;
+
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result EnvironmentSetHandler(void* context, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    bool updating = context != nullptr;
+    uint64_t environmentIn = registers.general[0];
+
+    GuestFloatingEnvironment wanted{0, 0};
+    if (environmentIn != 0 && !memory.Read(memory.context, (GuestState::GuestAddress)environmentIn, &wanted, sizeof(wanted)))
+    {
+        registers.general[0] = (uint64_t)(int64_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    uint32_t raised = registers.floatingPointStatus & GUEST_EXCEPTION_MASK;
+    registers.floatingPointControl = wanted.control;
+    registers.floatingPointStatus = wanted.status | (updating ? raised : 0);
+
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result ExceptionClearHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    registers.floatingPointStatus &= ~((uint32_t)registers.general[0] & GUEST_EXCEPTION_MASK);
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result ExceptionRaiseHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    registers.floatingPointStatus |= (uint32_t)registers.general[0] & GUEST_EXCEPTION_MASK;
+    registers.general[0] = 0;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result ExceptionTestHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    registers.general[0] = registers.floatingPointStatus & (uint32_t)registers.general[0] & GUEST_EXCEPTION_MASK;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result CompressStartDetailedHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    int32_t produced = HostBridge::CompressStartDetailed(
+        (void*)registers.general[0], (int32_t)registers.general[1], (int32_t)registers.general[2], (int32_t)registers.general[3],
+        (int32_t)registers.general[4], (int32_t)registers.general[5], (const char*)registers.general[6], (int32_t)registers.general[7]);
+
+    registers.general[0] = (uint64_t)(int64_t)produced;
+    return AbiBridge::Result::Ok;
+}
+
+struct GuestStreamCookie
+{
+    uint64_t cookie;
+    uint64_t readFunction;
+    uint64_t writeFunction;
+    uint64_t seekFunction;
+    uint64_t closeFunction;
+};
+
+static constexpr size_t GUEST_STREAM_CHUNK_BYTES = 1u << 30;
+
+static ssize_t GuestStreamRead(void* context, char* buffer, size_t size)
+{
+    GuestStreamCookie* stream = (GuestStreamCookie*)context;
+    if (stream->readFunction == 0)
+    {
+        errno = EBADF;
+        return -1;
+    }
+
+    uint64_t arguments[3] = {stream->cookie, (uint64_t)buffer, (uint64_t)(size < GUEST_STREAM_CHUNK_BYTES ? size : GUEST_STREAM_CHUNK_BYTES)};
+    uint64_t returned = 0;
+
+    if (GuestRuntime::CallGuestOnCurrentThread((GuestState::GuestAddress)stream->readFunction, arguments, 3, returned) !=
+        GuestRuntime::Result::Ok)
+    {
+        errno = EIO;
+        return -1;
+    }
+
+    return (ssize_t)(int32_t)(uint32_t)returned;
+}
+
+static ssize_t GuestStreamWrite(void* context, const char* buffer, size_t size)
+{
+    GuestStreamCookie* stream = (GuestStreamCookie*)context;
+    if (stream->writeFunction == 0)
+    {
+        errno = EBADF;
+        return -1;
+    }
+
+    uint64_t arguments[3] = {stream->cookie, (uint64_t)buffer, (uint64_t)(size < GUEST_STREAM_CHUNK_BYTES ? size : GUEST_STREAM_CHUNK_BYTES)};
+    uint64_t returned = 0;
+
+    if (GuestRuntime::CallGuestOnCurrentThread((GuestState::GuestAddress)stream->writeFunction, arguments, 3, returned) !=
+        GuestRuntime::Result::Ok)
+    {
+        errno = EIO;
+        return -1;
+    }
+
+    int32_t written = (int32_t)(uint32_t)returned;
+    return written < 0 ? -1 : (ssize_t)written;
+}
+
+static int GuestStreamSeek(void* context, off64_t* offset, int whence)
+{
+    GuestStreamCookie* stream = (GuestStreamCookie*)context;
+    if (stream->seekFunction == 0 || !offset)
+    {
+        errno = ESPIPE;
+        return -1;
+    }
+
+    uint64_t arguments[3] = {stream->cookie, (uint64_t)*offset, (uint64_t)(int64_t)whence};
+    uint64_t returned = 0;
+
+    if (GuestRuntime::CallGuestOnCurrentThread((GuestState::GuestAddress)stream->seekFunction, arguments, 3, returned) !=
+        GuestRuntime::Result::Ok)
+    {
+        errno = EIO;
+        return -1;
+    }
+
+    int64_t position = (int64_t)returned;
+    if (position < 0) return -1;
+
+    *offset = position;
+    return 0;
+}
+
+static int GuestStreamClose(void* context)
+{
+    GuestStreamCookie* stream = (GuestStreamCookie*)context;
+    int status = 0;
+
+    if (stream->closeFunction != 0)
+    {
+        uint64_t arguments[1] = {stream->cookie};
+        uint64_t returned = 0;
+
+        if (GuestRuntime::CallGuestOnCurrentThread((GuestState::GuestAddress)stream->closeFunction, arguments, 1, returned) !=
+            GuestRuntime::Result::Ok)
+        {
+            status = -1;
+        }
+        else
+        {
+            status = (int32_t)(uint32_t)returned;
+        }
+    }
+
+    delete stream;
+    return status;
+}
+
+static AbiBridge::Result GuestStreamOpenHandler(void*, GuestState::Registers& registers, const GuestState::MemoryAccessor&)
+{
+    GuestStreamCookie* stream = new GuestStreamCookie{registers.general[0], registers.general[1], registers.general[2],
+                                                      registers.general[3], registers.general[4]};
+
+    if (stream->readFunction == 0 && stream->writeFunction == 0)
+    {
+        delete stream;
+        errno = EINVAL;
+        registers.general[0] = 0;
+        return AbiBridge::Result::Ok;
+    }
+
+    const char* mode = stream->readFunction != 0 && stream->writeFunction != 0 ? "r+" : (stream->readFunction != 0 ? "r" : "w");
+
+    cookie_io_functions_t functions{};
+    functions.read = &GuestStreamRead;
+    functions.write = &GuestStreamWrite;
+    functions.seek = &GuestStreamSeek;
+    functions.close = &GuestStreamClose;
+
+    FILE* opened = fopencookie(stream, mode, functions);
+    if (!opened) delete stream;
+
+    registers.general[0] = (uint64_t)opened;
+    return AbiBridge::Result::Ok;
+}
+
 static AbiBridge::Result FflushHandler(void* context, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
 {
     (void)memory;
@@ -2064,6 +2703,52 @@ static AbiBridge::Result DeniedCallHandler(void* context, GuestState::Registers&
 
     errno = EACCES;
     registers.general[0] = (uint64_t)(int64_t)-1;
+    return AbiBridge::Result::Ok;
+}
+
+static AbiBridge::Result ProtectMemoryHandler(void* context, GuestState::Registers& registers, const GuestState::MemoryAccessor& memory)
+{
+    (void)memory;
+
+    GuestRuntime::Instance& instance = *(GuestRuntime::Instance*)context;
+
+    uint64_t address = registers.general[0];
+    uint64_t length = registers.general[1];
+    int32_t protection = (int32_t)registers.general[2];
+
+    GuestState::GuestAddress arenaBase{};
+    uint64_t arenaLength = 0;
+    GuestRuntime::ArenaBounds(instance, arenaBase, arenaLength);
+
+    uint64_t base = (uint64_t)arenaBase;
+    bool insideArena = length != 0 && address >= base && address - base < arenaLength;
+
+    if (!insideArena)
+    {
+        registers.general[0] = (uint64_t)(int64_t)HostBridge::ProtectMemory((void*)address, length, protection);
+        return AbiBridge::Result::Ok;
+    }
+
+    const AbiBridge::Registry& registry = GuestRuntime::BridgeRegistry(instance);
+    if (AbiBridge::IsGuestStub(registry, (GuestState::GuestAddress)address) ||
+        AbiBridge::IsGuestStub(registry, (GuestState::GuestAddress)(address + length - 1)))
+    {
+        errno = EACCES;
+        registers.general[0] = (uint64_t)(int64_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    GuestRuntime::Result changed = GuestRuntime::Protect(instance, (GuestState::GuestAddress)address, length, (protection & PROT_READ) != 0,
+                                                         (protection & PROT_WRITE) != 0, (protection & PROT_EXEC) != 0);
+
+    if (changed != GuestRuntime::Result::Ok)
+    {
+        errno = ENOMEM;
+        registers.general[0] = (uint64_t)(int64_t)-1;
+        return AbiBridge::Result::Ok;
+    }
+
+    registers.general[0] = 0;
     return AbiBridge::Result::Ok;
 }
 
@@ -2662,6 +3347,161 @@ static void InvalidateGuestCode(void* context, uint64_t address, uint64_t length
     GuestRuntime::InvalidateBlocks(*(GuestRuntime::Instance*)context, (GuestState::GuestAddress)address, length);
 }
 
+static constexpr uint8_t GUEST_CTYPE_UPPER = 0x01;
+static constexpr uint8_t GUEST_CTYPE_LOWER = 0x02;
+static constexpr uint8_t GUEST_CTYPE_DIGIT = 0x04;
+static constexpr uint8_t GUEST_CTYPE_SPACE = 0x08;
+static constexpr uint8_t GUEST_CTYPE_PUNCTUATION = 0x10;
+static constexpr uint8_t GUEST_CTYPE_CONTROL = 0x20;
+static constexpr uint8_t GUEST_CTYPE_HEX = 0x40;
+static constexpr uint8_t GUEST_CTYPE_BLANK = 0x80;
+static constexpr uint64_t GUEST_CTYPE_TABLE_BYTES = 257;
+static constexpr uint64_t GUEST_TIME_ZONE_NAME_BYTES = 8;
+static constexpr uint64_t GUEST_ENVIRONMENT_SLOTS = 256;
+
+static uint8_t GuestCharacterClass(int character)
+{
+    uint8_t flags = 0;
+
+    if (character >= 'A' && character <= 'Z') flags |= GUEST_CTYPE_UPPER;
+    if (character >= 'a' && character <= 'z') flags |= GUEST_CTYPE_LOWER;
+    if (character >= '0' && character <= '9') flags |= GUEST_CTYPE_DIGIT;
+    if (character == ' ' || (character >= '\t' && character <= '\r')) flags |= GUEST_CTYPE_SPACE;
+    if (character > ' ' && character < 0x7f && !isalnum(character)) flags |= GUEST_CTYPE_PUNCTUATION;
+    if (character < ' ' || character == 0x7f) flags |= GUEST_CTYPE_CONTROL;
+    if ((character >= 'A' && character <= 'F') || (character >= 'a' && character <= 'f')) flags |= GUEST_CTYPE_HEX;
+    if (character == ' ') flags |= GUEST_CTYPE_BLANK;
+
+    return flags;
+}
+
+static bool PublishDataObject(GuestRuntime::Instance& instance, const char* name, const void* content, uint64_t size,
+                              GuestState::GuestAddress& address)
+{
+    AbiBridge::Registry& registry = GuestRuntime::BridgeRegistry(instance);
+    if (AbiBridge::LookupGuestData(registry, name, address) == AbiBridge::Result::Ok) return true;
+
+    GuestRuntime::Result reserved = GuestRuntime::RegisterDataObject(instance, name, size, address);
+    if (reserved != GuestRuntime::Result::Ok)
+    {
+        fprintf(stderr, "[guestlibc] cannot allocate %s: %s\n", name, GuestRuntime::ResultName(reserved));
+        return false;
+    }
+
+    const GuestState::MemoryAccessor& memory = GuestRuntime::Memory(instance);
+    if (content && !memory.Write(memory.context, address, content, size))
+    {
+        fprintf(stderr, "[guestlibc] cannot publish %s\n", name);
+        return false;
+    }
+
+    return true;
+}
+
+static bool PublishPointerTo(GuestRuntime::Instance& instance, const char* name, GuestState::GuestAddress target)
+{
+    uint64_t value = (uint64_t)target;
+    GuestState::GuestAddress address{};
+    return PublishDataObject(instance, name, &value, sizeof(value), address);
+}
+
+static bool PublishCharacterTable(GuestRuntime::Instance& instance)
+{
+    uint8_t table[GUEST_CTYPE_TABLE_BYTES] = {};
+    for (int character = 0; character < 128; ++character) table[character + 1] = GuestCharacterClass(character);
+
+    GuestState::GuestAddress tableAddress{};
+    if (!PublishDataObject(instance, "acl:ctype", table, sizeof(table), tableAddress)) return false;
+
+    return PublishPointerTo(instance, "_ctype_", tableAddress);
+}
+
+static bool PublishTimeZone(GuestRuntime::Instance& instance)
+{
+    char names[2 * GUEST_TIME_ZONE_NAME_BYTES] = "UTC";
+    memcpy(names + GUEST_TIME_ZONE_NAME_BYTES, "UTC", 4);
+
+    GuestState::GuestAddress namesAddress{};
+    if (!PublishDataObject(instance, "acl:tzname", names, sizeof(names), namesAddress)) return false;
+
+    uint64_t pointers[2] = {(uint64_t)namesAddress, (uint64_t)namesAddress + GUEST_TIME_ZONE_NAME_BYTES};
+    int32_t daylight = 0;
+    int64_t offset = 0;
+
+    GuestState::GuestAddress address{};
+    return PublishDataObject(instance, "tzname", pointers, sizeof(pointers), address) &&
+           PublishDataObject(instance, "daylight", &daylight, sizeof(daylight), address) &&
+           PublishDataObject(instance, "timezone", &offset, sizeof(offset), address);
+}
+
+static bool PublishOptionParserState(GuestRuntime::Instance& instance)
+{
+    int32_t first = 1;
+    int32_t zero = 0;
+    uint64_t none = 0;
+
+    GuestState::GuestAddress address{};
+    return PublishDataObject(instance, "optind", &first, sizeof(first), address) &&
+           PublishDataObject(instance, "opterr", &first, sizeof(first), address) &&
+           PublishDataObject(instance, "optopt", &zero, sizeof(zero), address) &&
+           PublishDataObject(instance, "optreset", &zero, sizeof(zero), address) &&
+           PublishDataObject(instance, "optarg", &none, sizeof(none), address);
+}
+
+static bool PublishStackGuard(GuestRuntime::Instance& instance)
+{
+    uint64_t guard = 0;
+    if (getrandom(&guard, sizeof(guard), 0) != (ssize_t)sizeof(guard)) guard = 0x5a17c0de9e3779b9ull;
+    guard &= ~0xffull;
+
+    GuestState::GuestAddress address{};
+    return PublishDataObject(instance, "__stack_chk_guard", &guard, sizeof(guard), address);
+}
+
+static bool PublishEnvironment(GuestRuntime::Instance& instance)
+{
+    std::vector<std::string> entries;
+    {
+        std::lock_guard<std::mutex> guard(environmentMutex);
+        for (const auto& variable : guestEnvironment)
+        {
+            if (entries.size() + 1 >= GUEST_ENVIRONMENT_SLOTS) break;
+            entries.push_back(variable.first + "=" + variable.second);
+        }
+    }
+
+    uint64_t textBytes = 0;
+    for (const std::string& entry : entries) textBytes += entry.size() + 1;
+
+    std::vector<uint8_t> text(textBytes == 0 ? 1 : textBytes, 0);
+    GuestState::GuestAddress textAddress{};
+    if (!PublishDataObject(instance, "acl:environment", nullptr, text.size(), textAddress)) return false;
+
+    std::vector<uint64_t> pointers(GUEST_ENVIRONMENT_SLOTS, 0);
+    uint64_t cursor = 0;
+
+    for (size_t index = 0; index < entries.size(); ++index)
+    {
+        memcpy(text.data() + cursor, entries[index].c_str(), entries[index].size() + 1);
+        pointers[index] = (uint64_t)textAddress + cursor;
+        cursor += entries[index].size() + 1;
+    }
+
+    const GuestState::MemoryAccessor& memory = GuestRuntime::Memory(instance);
+    if (!memory.Write(memory.context, textAddress, text.data(), text.size())) return false;
+
+    GuestState::GuestAddress pointersAddress{};
+    if (!PublishDataObject(instance, "acl:environ", pointers.data(), pointers.size() * sizeof(uint64_t), pointersAddress)) return false;
+
+    return PublishPointerTo(instance, "environ", pointersAddress) && PublishPointerTo(instance, "__environ", pointersAddress);
+}
+
+static bool PublishLibraryData(GuestRuntime::Instance& instance)
+{
+    return PublishCharacterTable(instance) && PublishTimeZone(instance) && PublishOptionParserState(instance) &&
+           PublishStackGuard(instance) && PublishEnvironment(instance);
+}
+
 GuestLibc::Result GuestLibc::RegisterAll(GuestRuntime::Instance& instance)
 {
     AbiBridge::Registry& registry = GuestRuntime::BridgeRegistry(instance);
@@ -2686,6 +3526,7 @@ GuestLibc::Result GuestLibc::RegisterAll(GuestRuntime::Instance& instance)
     }
 
     GuestRuntime::SetFaultHandler(&DeliverGuestFault, nullptr);
+    HostBridge::SetStandardStreams((uint64_t)streams, GUEST_FILE_STRIDE_BYTES);
 
     const char* streamNames[GUEST_STANDARD_STREAM_COUNT] = {"stdin", "stdout", "stderr"};
     for (uint64_t index = 0; index < GUEST_STANDARD_STREAM_COUNT; ++index)
@@ -2708,6 +3549,8 @@ GuestLibc::Result GuestLibc::RegisterAll(GuestRuntime::Instance& instance)
             return Result::RegistrationFailed;
         }
     }
+
+    if (!PublishLibraryData(instance)) return Result::RegistrationFailed;
 
     struct Entry
     {
@@ -2974,6 +3817,7 @@ GuestLibc::Result GuestLibc::RegisterAll(GuestRuntime::Instance& instance)
         {"getpid", (void*)&HostBridge::ProcessId, integer, {}, 0},
         {"getuid", (void*)&HostBridge::UserId, integer, {}, 0},
         {"geteuid", (void*)&HostBridge::EffectiveUserId, integer, {}, 0},
+        {"getgid", (void*)&HostBridge::GroupId, integer, {}, 0},
         {"getegid", (void*)&HostBridge::EffectiveGroupId, integer, {}, 0},
         {"basename", (void*)&HostBridge::BaseName, pointer, {pointer}, 1},
         {"fnmatch", (void*)&HostBridge::MatchPattern, integer, {pointer, pointer, integer}, 3},
@@ -2982,7 +3826,6 @@ GuestLibc::Result GuestLibc::RegisterAll(GuestRuntime::Instance& instance)
         {"flock", (void*)&HostBridge::LockDescriptor, integer, {integer, integer}, 2},
         {"poll", (void*)&HostBridge::PollDescriptors, integer, {pointer, word, integer}, 3},
         {"madvise", (void*)&HostBridge::AdviseMemory, integer, {pointer, word, integer}, 3},
-        {"mprotect", (void*)&HostBridge::ProtectMemory, integer, {pointer, word, integer}, 3},
         {"munmap", (void*)&HostBridge::UnmapMemory, integer, {pointer, word}, 2},
         {"mmap", (void*)&HostBridge::MapMemory, pointer, {pointer, word, integer, integer, integer, word}, 6},
         {"prctl", (void*)&HostBridge::ProcessControl, integer, {integer, word, word, word}, 4},
@@ -3062,6 +3905,159 @@ GuestLibc::Result GuestLibc::RegisterAll(GuestRuntime::Instance& instance)
         {"inflateEnd", (void*)&HostBridge::DecompressEnd, integer, {pointer}, 1},
         {"__cxa_thread_atexit_impl", (void*)&IgnoredRegistration, integer, {pointer, pointer, pointer}, 3},
 
+        {"__memmove_chk", (void*)&GuestMemmoveChecked, pointer, {pointer, pointer, word, word}, 4},
+        {"__strlen_chk", (void*)&GuestStrlenChecked, word, {pointer, word}, 2},
+        {"__strchr_chk", (void*)&GuestStrchrChecked, pointer, {pointer, integer, word}, 3},
+        {"__strrchr_chk", (void*)&GuestStrrchrChecked, pointer, {pointer, integer, word}, 3},
+        {"__strncpy_chk", (void*)&GuestStrncpyChecked, pointer, {pointer, pointer, word, word}, 4},
+        {"__strncpy_chk2", (void*)&GuestStrncpyCheckedBoth, pointer, {pointer, pointer, word, word, word}, 5},
+        {"__strcpy_chk", (void*)&GuestStrcpyChecked, pointer, {pointer, pointer, word}, 3},
+        {"__stpcpy_chk", (void*)&GuestStpcpyChecked, pointer, {pointer, pointer, word}, 3},
+        {"__strcat_chk", (void*)&GuestStrcatChecked, pointer, {pointer, pointer, word}, 3},
+        {"__strncat_chk", (void*)&GuestStrncatChecked, pointer, {pointer, pointer, word, word}, 4},
+        {"__strlcpy_chk", (void*)&GuestStrlcpyChecked, word, {pointer, pointer, word, word}, 4},
+        {"__read_chk", (void*)&GuestReadChecked, word, {integer, pointer, word, word}, 4},
+        {"__write_chk", (void*)&GuestWriteChecked, word, {integer, pointer, word, word}, 4},
+        {"__pread_chk", (void*)&GuestPreadChecked, word, {integer, pointer, word, word, word}, 5},
+        {"__pread64_chk", (void*)&GuestPreadChecked, word, {integer, pointer, word, word, word}, 5},
+        {"__readlink_chk", (void*)&GuestReadlinkChecked, word, {pointer, pointer, word, word}, 4},
+        {"__fgets_chk", (void*)&GuestFgetsChecked, pointer, {pointer, integer, pointer, word}, 4},
+        {"__fread_chk", (void*)&GuestFreadChecked, word, {pointer, word, word, pointer, word}, 5},
+        {"__open_2", (void*)&GuestOpenChecked, integer, {pointer, integer}, 2},
+        {"__openat_2", (void*)&GuestOpenAtChecked, integer, {integer, pointer, integer}, 3},
+        {"__umask_chk", (void*)&GuestUmaskChecked, integer, {integer}, 1},
+        {"umask", (void*)&HostBridge::ChangeCreationMask, integer, {integer}, 1},
+
+        {"isalpha_l", (void*)&HostBridge::IsAlpha, integer, {integer}, 1},
+        {"isalnum_l", (void*)&HostBridge::IsAlphaNumeric, integer, {integer}, 1},
+        {"isdigit_l", (void*)&HostBridge::IsDigit, integer, {integer}, 1},
+        {"isxdigit_l", (void*)&HostBridge::IsHexDigit, integer, {integer}, 1},
+        {"islower_l", (void*)&HostBridge::IsLower, integer, {integer}, 1},
+        {"isupper_l", (void*)&HostBridge::IsUpper, integer, {integer}, 1},
+        {"isspace_l", (void*)&HostBridge::IsSpace, integer, {integer}, 1},
+        {"ispunct_l", (void*)&HostBridge::IsPunctuation, integer, {integer}, 1},
+        {"iscntrl_l", (void*)&HostBridge::IsControl, integer, {integer}, 1},
+        {"isprint_l", (void*)&HostBridge::IsPrintable, integer, {integer}, 1},
+        {"isgraph_l", (void*)&HostBridge::IsGraphical, integer, {integer}, 1},
+        {"isblank_l", (void*)&HostBridge::IsBlank, integer, {integer}, 1},
+        {"tolower_l", (void*)&HostBridge::ToLower, integer, {integer}, 1},
+        {"toupper_l", (void*)&HostBridge::ToUpper, integer, {integer}, 1},
+        {"iswalpha", (void*)&HostBridge::IsWideAlphabeticAnywhere, integer, {integer}, 1},
+        {"iswblank", (void*)&HostBridge::IsWideBlankAnywhere, integer, {integer}, 1},
+        {"iswcntrl", (void*)&HostBridge::IsWideControlAnywhere, integer, {integer}, 1},
+        {"iswdigit", (void*)&HostBridge::IsWideDigitAnywhere, integer, {integer}, 1},
+        {"iswlower", (void*)&HostBridge::IsWideLowerAnywhere, integer, {integer}, 1},
+        {"iswprint", (void*)&HostBridge::IsWidePrintableAnywhere, integer, {integer}, 1},
+        {"iswpunct", (void*)&HostBridge::IsWidePunctuationAnywhere, integer, {integer}, 1},
+        {"iswspace", (void*)&HostBridge::IsWideSpaceAnywhere, integer, {integer}, 1},
+        {"iswupper", (void*)&HostBridge::IsWideUpperAnywhere, integer, {integer}, 1},
+        {"iswxdigit", (void*)&HostBridge::IsWideHexDigitAnywhere, integer, {integer}, 1},
+        {"iswalnum", (void*)&HostBridge::IsWideAlphaNumericAnywhere, integer, {integer}, 1},
+        {"iswgraph", (void*)&HostBridge::IsWideGraphicalAnywhere, integer, {integer}, 1},
+        {"strtof_l", (void*)&HostBridge::ParseFloat, FloatArgument(), {pointer, pointer}, 2},
+        {"strtod_l", (void*)&HostBridge::ParseDouble, DoubleArgument(), {pointer, pointer}, 2},
+        {"strtol_l", (void*)&HostBridge::ParseSigned, word, {pointer, pointer, integer}, 3},
+        {"strtoul_l", (void*)&HostBridge::ParseUnsigned, word, {pointer, pointer, integer}, 3},
+
+        {"rand", (void*)&HostBridge::RandomInteger, integer, {}, 0},
+        {"srand", (void*)&HostBridge::SeedRandomInteger, VoidArgument(), {integer}, 1},
+        {"random", (void*)&HostBridge::NextRandom, word, {}, 0},
+        {"srandom", (void*)&HostBridge::SeedRandom, VoidArgument(), {word}, 1},
+        {"atoll", (void*)&HostBridge::ParseLongLong, word, {pointer}, 1},
+        {"strtok", (void*)&HostBridge::SplitStringShared, pointer, {pointer, pointer}, 2},
+        {"strcasestr", (void*)&HostBridge::FindSubstringIgnoringCase, pointer, {pointer, pointer}, 2},
+        {"strsignal", (void*)&HostBridge::DescribeSignal, pointer, {integer}, 1},
+        {"perror", (void*)&HostBridge::PrintError, VoidArgument(), {pointer}, 1},
+        {"gai_strerror", (void*)&HostBridge::DescribeAddressError, pointer, {integer}, 1},
+        {"inet_aton", (void*)&HostBridge::AddressFromTextChecked, integer, {pointer, pointer}, 2},
+        {"__cmsg_nxthdr", (void*)&HostBridge::NextControlMessage, pointer, {pointer, pointer}, 2},
+        {"wcsftime", (void*)&HostBridge::FormatWideTime, word, {pointer, word, pointer, pointer}, 4},
+        {"tzset", (void*)&HostBridge::UpdateTimeZone, VoidArgument(), {}, 0},
+        {"aligned_alloc", (void*)&HostBridge::AllocateAligned, pointer, {word, word}, 2},
+        {"_Znwm", (void*)&HostBridge::AllocateBytes, pointer, {word}, 1},
+        {"_Znam", (void*)&HostBridge::AllocateBytes, pointer, {word}, 1},
+        {"_ZdlPv", (void*)&HostBridge::ReleaseAllocation, VoidArgument(), {pointer}, 1},
+        {"_ZdaPv", (void*)&HostBridge::ReleaseAllocation, VoidArgument(), {pointer}, 1},
+        {"getprogname", (void*)&HostBridge::ProgramName, pointer, {}, 0},
+        {"putwc", (void*)&HostBridge::WriteWideCharacter, integer, {integer, pointer}, 2},
+
+        {"frexpf", (void*)&HostBridge::SplitExponentNarrow, FloatArgument(), {FloatArgument(), pointer}, 2},
+        {"exp2", (void*)&HostBridge::BinaryExponential, DoubleArgument(), {DoubleArgument()}, 1},
+        {"sinhf", (void*)&HostBridge::HyperbolicSineNarrow, FloatArgument(), {FloatArgument()}, 1},
+        {"lrintf", (void*)&HostBridge::RoundToLongNarrow, word, {FloatArgument()}, 1},
+        {"lrint", (void*)&HostBridge::RoundToLong, word, {DoubleArgument()}, 1},
+        {"ilogbf", (void*)&HostBridge::BinaryExponentNarrow, integer, {FloatArgument()}, 1},
+        {"__fpclassifyd", (void*)&HostBridge::ClassifyDouble, integer, {DoubleArgument()}, 1},
+        {"__fpclassify", (void*)&HostBridge::ClassifyDouble, integer, {DoubleArgument()}, 1},
+        {"__fpclassifyf", (void*)&HostBridge::ClassifyNarrow, integer, {FloatArgument()}, 1},
+        {"__isfinitef", (void*)&HostBridge::IsFiniteNarrow, integer, {FloatArgument()}, 1},
+        {"__isfinite", (void*)&HostBridge::IsFinite, integer, {DoubleArgument()}, 1},
+        {"isnan", (void*)&HostBridge::IsNotANumber, integer, {DoubleArgument()}, 1},
+        {"__isnan", (void*)&HostBridge::IsNotANumber, integer, {DoubleArgument()}, 1},
+        {"isinf", (void*)&HostBridge::IsInfinite, integer, {DoubleArgument()}, 1},
+        {"__isinf", (void*)&HostBridge::IsInfinite, integer, {DoubleArgument()}, 1},
+
+        {"writev", (void*)&HostBridge::WriteGathered, word, {integer, pointer, integer}, 3},
+        {"readv", (void*)&HostBridge::ReadScattered, word, {integer, pointer, integer}, 3},
+        {"pread", (void*)&HostBridge::ReadDescriptorAt, word, {integer, pointer, word, word}, 4},
+        {"pread64", (void*)&HostBridge::ReadDescriptorAt, word, {integer, pointer, word, word}, 4},
+        {"pwrite", (void*)&HostBridge::WriteDescriptorAt, word, {integer, pointer, word, word}, 4},
+        {"pwrite64", (void*)&HostBridge::WriteDescriptorAt, word, {integer, pointer, word, word}, 4},
+        {"fsync", (void*)&HostBridge::SynchronizeDescriptor, integer, {integer}, 1},
+        {"fdatasync", (void*)&HostBridge::SynchronizeDescriptorData, integer, {integer}, 1},
+        {"dup2", (void*)&HostBridge::ReplaceDescriptor, integer, {integer, integer}, 2},
+        {"dup3", (void*)&HostBridge::ReplaceDescriptorWithFlags, integer, {integer, integer, integer}, 3},
+        {"pipe2", (void*)&HostBridge::CreatePipeWithFlags, integer, {pointer, integer}, 2},
+        {"eventfd", (void*)&HostBridge::CreateEventDescriptor, integer, {integer, integer}, 2},
+        {"mkstemp", (void*)&HostBridge::CreateTemporaryFile, integer, {pointer}, 1},
+        {"posix_fadvise", (void*)&HostBridge::AdviseFileAccess, integer, {integer, word, word, integer}, 4},
+        {"posix_fadvise64", (void*)&HostBridge::AdviseFileAccess, integer, {integer, word, word, integer}, 4},
+        {"readahead", (void*)&HostBridge::ReadAhead, word, {integer, word, word}, 3},
+        {"msync", (void*)&HostBridge::SynchronizeMemory, integer, {pointer, word, integer}, 3},
+        {"mlock", (void*)&HostBridge::LockMemory, integer, {pointer, word}, 2},
+        {"munlock", (void*)&HostBridge::UnlockMemory, integer, {pointer, word}, 2},
+        {"epoll_create1", (void*)&HostBridge::CreateEventPoll, integer, {integer}, 1},
+        {"epoll_create", (void*)&HostBridge::CreateEventPollSized, integer, {integer}, 1},
+        {"epoll_ctl", (void*)&HostBridge::ControlEventPoll, integer, {integer, integer, integer, pointer}, 4},
+        {"epoll_wait", (void*)&HostBridge::WaitEventPoll, integer, {integer, pointer, integer, integer}, 4},
+        {"epoll_pwait", (void*)&HostBridge::WaitEventPollMasked, integer, {integer, pointer, integer, integer, pointer}, 5},
+        {"inotify_init", (void*)&HostBridge::CreateFileWatch, integer, {}, 0},
+        {"inotify_init1", (void*)&HostBridge::CreateFileWatchWithFlags, integer, {integer}, 1},
+        {"inotify_add_watch", (void*)&HostBridge::AddFileWatch, integer, {integer, pointer, integer}, 3},
+        {"inotify_rm_watch", (void*)&HostBridge::RemoveFileWatch, integer, {integer, integer}, 2},
+
+        {"getppid", (void*)&HostBridge::ParentProcessId, integer, {}, 0},
+        {"waitpid", (void*)&HostBridge::WaitForChild, integer, {integer, pointer, integer}, 3},
+        {"wait", (void*)&HostBridge::WaitForAnyChild, integer, {pointer}, 1},
+        {"uname", (void*)&HostBridge::DescribeSystem, integer, {pointer}, 1},
+        {"sysinfo", (void*)&HostBridge::DescribeSystemMemory, integer, {pointer}, 1},
+        {"gethostname", (void*)&HostBridge::HostName, integer, {pointer, word}, 2},
+        {"getrlimit", (void*)&HostBridge::ReadResourceLimit, integer, {integer, pointer}, 2},
+        {"getrlimit64", (void*)&HostBridge::ReadResourceLimit, integer, {integer, pointer}, 2},
+        {"setrlimit", (void*)&HostBridge::WriteResourceLimit, integer, {integer, pointer}, 2},
+        {"setrlimit64", (void*)&HostBridge::WriteResourceLimit, integer, {integer, pointer}, 2},
+        {"getrusage", (void*)&HostBridge::ReadResourceUsage, integer, {integer, pointer}, 2},
+        {"alarm", (void*)&HostBridge::ScheduleAlarm, integer, {integer}, 1},
+        {"sleep", (void*)&HostBridge::SleepSeconds, integer, {integer}, 1},
+        {"sched_getscheduler", (void*)&HostBridge::SchedulingPolicy, integer, {integer}, 1},
+        {"sched_get_priority_min", (void*)&HostBridge::SchedulingPriorityMinimum, integer, {integer}, 1},
+        {"sched_get_priority_max", (void*)&HostBridge::SchedulingPriorityMaximum, integer, {integer}, 1},
+        {"sched_getparam", (void*)&HostBridge::ReadSchedulingParameters, integer, {integer, pointer}, 2},
+        {"sched_getaffinity", (void*)&HostBridge::ReadProcessorAffinity, integer, {integer, word, pointer}, 3},
+        {"sched_setaffinity", (void*)&HostBridge::WriteProcessorAffinity, integer, {integer, word, pointer}, 3},
+        {"sched_getcpu", (void*)&HostBridge::CurrentProcessor, integer, {}, 0},
+
+        {"inflateInit_", (void*)&HostBridge::DecompressStart, integer, {pointer, pointer, integer}, 3},
+        {"inflateReset", (void*)&HostBridge::DecompressReset, integer, {pointer}, 1},
+        {"deflateInit_", (void*)&HostBridge::CompressStart, integer, {pointer, integer, pointer, integer}, 4},
+        {"deflate", (void*)&HostBridge::Compress, integer, {pointer, integer}, 2},
+        {"deflateEnd", (void*)&HostBridge::CompressEnd, integer, {pointer}, 1},
+        {"deflateReset", (void*)&HostBridge::CompressReset, integer, {pointer}, 1},
+        {"deflateBound", (void*)&HostBridge::CompressBound, word, {pointer, word}, 2},
+        {"zError", (void*)&HostBridge::CompressionErrorText, pointer, {integer}, 1},
+        {"crc32", (void*)&HostBridge::ChecksumCrc32, word, {word, pointer, integer}, 3},
+        {"adler32", (void*)&HostBridge::ChecksumAdler32, word, {word, pointer, integer}, 3},
+
     };
 
     for (const Entry& entry : entries)
@@ -3101,13 +4097,86 @@ GuestLibc::Result GuestLibc::RegisterAll(GuestRuntime::Instance& instance)
         {"fscanf", &ScanStreamHandler, &instance},
         {"vasprintf", &AllocateFormattedHandler, nullptr},
         {"swprintf", &WideFormatHandler, nullptr},
+        {"__vsnprintf_chk", &CheckedVsnprintfHandler, nullptr},
+        {"__snprintf_chk", &CheckedSnprintfHandler, nullptr},
+        {"__vsprintf_chk", &CheckedVsprintfHandler, nullptr},
+        {"__sprintf_chk", &CheckedSprintfHandler, nullptr},
+        {"__android_log_buf_print", &AndroidLogBufferPrintHandler, nullptr},
 #endif
+        {"__android_log_buf_write", &AndroidLogBufferWriteHandler, nullptr},
+        {"putc", &FputcHandler, &instance},
+        {"putchar", &PutcharHandler, nullptr},
+        {"__fwrite_chk", &FwriteHandler, &instance},
+        {"rewind", &RewindHandler, &instance},
+        {"funopen", &GuestStreamOpenHandler, nullptr},
+        {"funopen64", &GuestStreamOpenHandler, nullptr},
+        {"fgetpos", &StreamGetPositionHandler, &instance},
+        {"fsetpos", &StreamSetPositionHandler, &instance},
+        {"setvbuf", &SucceedingStubHandler, nullptr},
+        {"lldiv", &LongDivideHandler, nullptr},
+        {"ldiv", &LongDivideHandler, nullptr},
+        {"imaxdiv", &LongDivideHandler, nullptr},
+        {"sigismember", &SignalSetMemberHandler, nullptr},
+        {"deflateInit2_", &CompressStartDetailedHandler, nullptr},
+        {"fegetround", &RoundingGetHandler, nullptr},
+        {"fesetround", &RoundingSetHandler, nullptr},
+        {"fegetenv", &EnvironmentGetHandler, nullptr},
+        {"feholdexcept", &EnvironmentGetHandler, (void*)1},
+        {"fesetenv", &EnvironmentSetHandler, nullptr},
+        {"feupdateenv", &EnvironmentSetHandler, (void*)1},
+        {"feclearexcept", &ExceptionClearHandler, nullptr},
+        {"feraiseexcept", &ExceptionRaiseHandler, nullptr},
+        {"fetestexcept", &ExceptionTestHandler, nullptr},
+        {"sem_close", &SucceedingStubHandler, nullptr},
+        {"sem_unlink", &SucceedingStubHandler, nullptr},
+        {"pthread_atfork", &SucceedingStubHandler, nullptr},
+        {"pthread_attr_setschedpolicy", &SucceedingStubHandler, nullptr},
+        {"pthread_attr_setschedparam", &SucceedingStubHandler, nullptr},
+        {"pthread_attr_getschedparam", &ZeroedIntegerOutHandler, nullptr},
+        {"pthread_attr_getschedpolicy", &ZeroedIntegerOutHandler, nullptr},
+        {"pthread_attr_getdetachstate", &ZeroedIntegerOutHandler, nullptr},
+        {"pthread_attr_setguardsize", &SucceedingStubHandler, nullptr},
+        {"pthread_attr_setscope", &SucceedingStubHandler, nullptr},
+        {"pthread_setschedparam", &SucceedingStubHandler, nullptr},
+        {"pthread_getschedparam", &ThreadSchedulingHandler, nullptr},
+        {"arc4random", &RandomWordHandler, nullptr},
+        {"arc4random_uniform", &RandomUniformHandler, nullptr},
+        {"arc4random_buf", &RandomBufferHandler, nullptr},
+        {"pthread_setschedprio", &SucceedingStubHandler, nullptr},
+        {"sched_setscheduler", &SucceedingStubHandler, nullptr},
+        {"sched_setparam", &SucceedingStubHandler, nullptr},
+        {"fork", &DeniedCallHandler, nullptr},
+        {"vfork", &DeniedCallHandler, nullptr},
+        {"clone", &DeniedCallHandler, nullptr},
+        {"execv", &DeniedCallHandler, nullptr},
+        {"execve", &DeniedCallHandler, nullptr},
+        {"execvp", &DeniedCallHandler, nullptr},
+        {"execl", &DeniedCallHandler, nullptr},
+        {"execlp", &DeniedCallHandler, nullptr},
+        {"popen", &DeniedPointerHandler, nullptr},
+        {"pclose", &DeniedCallHandler, nullptr},
+        {"kill", &DeniedCallHandler, nullptr},
+        {"tgkill", &DeniedCallHandler, nullptr},
+        {"timer_create", &DeniedCallHandler, nullptr},
+        {"timer_settime", &DeniedCallHandler, nullptr},
+        {"timer_delete", &DeniedCallHandler, nullptr},
+        {"mremap", &DeniedCallHandler, nullptr},
+        {"sendmsg", &DeniedCallHandler, nullptr},
+        {"recvmsg", &DeniedCallHandler, nullptr},
+        {"sendto", &DeniedCallHandler, nullptr},
+        {"recvfrom", &DeniedCallHandler, nullptr},
+        {"sendmmsg", &DeniedCallHandler, nullptr},
+        {"recvmmsg", &DeniedCallHandler, nullptr},
+        {"getnameinfo", &DeniedCallHandler, nullptr},
         {"__android_log_write", &AndroidLogWriteHandler, nullptr},
         {"ioctl", &DescriptorControlHandler, nullptr},
         {"dl_iterate_phdr", &IteratePhdrHandler, &instance},
         {"qsort", &SortArrayHandler, &instance},
         {"bsearch", &SearchArrayHandler, &instance},
         {"dladdr", &DescribeAddressHandler, &instance},
+        {"__loader_dladdr", &DescribeAddressHandler, &instance},
+        {"__loader_dl_iterate_phdr", &IteratePhdrHandler, &instance},
+        {"mprotect", &ProtectMemoryHandler, &instance},
         {"sem_init", &SemaphoreCreateHandler, nullptr},
         {"sem_destroy", &SemaphoreDestroyHandler, nullptr},
         {"sem_post", &SemaphorePostHandler, nullptr},

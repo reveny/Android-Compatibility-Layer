@@ -20,6 +20,12 @@ public class Picture
         mRecorded = source.mRecorded;
     }
 
+    @Override
+    protected void finalize() throws Throwable
+    {
+        super.finalize();
+    }
+
     public Canvas beginRecording(int width, int height)
     {
         mWidth = Math.max(0, width);
@@ -62,4 +68,49 @@ public class Picture
     {
         return mRecorded;
     }
+
+    @Deprecated
+    public void writeToStream(java.io.OutputStream stream)
+    {
+        if (stream == null) throw new NullPointerException();
+
+        try
+        {
+            java.io.DataOutputStream output = new java.io.DataOutputStream(stream);
+            output.writeInt(STREAM_MAGIC);
+            output.writeInt(mWidth);
+            output.writeInt(mHeight);
+            output.writeBoolean(mRecorded != null);
+            output.flush();
+
+            if (mRecorded != null && !mRecorded.compress(Bitmap.CompressFormat.PNG, 100, stream)) throw new RuntimeException();
+        }
+        catch (java.io.IOException failure)
+        {
+            throw new RuntimeException(failure);
+        }
+    }
+
+    @Deprecated
+    public static Picture createFromStream(java.io.InputStream stream)
+    {
+        try
+        {
+            java.io.DataInputStream input = new java.io.DataInputStream(stream);
+            if (input.readInt() != STREAM_MAGIC) return new Picture();
+
+            Picture picture = new Picture();
+            picture.mWidth = input.readInt();
+            picture.mHeight = input.readInt();
+            if (input.readBoolean()) picture.mRecorded = BitmapFactory.decodeStream(input, null, null);
+
+            return picture;
+        }
+        catch (java.io.IOException failure)
+        {
+            return new Picture();
+        }
+    }
+
+    private static final int STREAM_MAGIC = 0x41434C50;
 }

@@ -2,6 +2,8 @@ package android.view;
 
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.res.AssetManager;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 
 public class ContextThemeWrapper extends ContextWrapper
@@ -9,6 +11,9 @@ public class ContextThemeWrapper extends ContextWrapper
     private int mThemeResource;
     private Resources.Theme mTheme;
     private LayoutInflater mInflater;
+    private Configuration mOverrideConfiguration;
+    private Resources mResources;
+    private boolean mResourcesRequested;
 
     public ContextThemeWrapper()
     {
@@ -33,9 +38,57 @@ public class ContextThemeWrapper extends ContextWrapper
         super.attachBaseContext(base);
     }
 
+    public void applyOverrideConfiguration(Configuration overrideConfiguration)
+    {
+        if (mResources != null || mResourcesRequested)
+        {
+            throw new IllegalStateException("getResources() or getAssets() has already been called");
+        }
+        if (mOverrideConfiguration != null) throw new IllegalStateException("Override configuration has already been set");
+
+        mOverrideConfiguration = new Configuration(overrideConfiguration);
+    }
+
+    public Configuration getOverrideConfiguration()
+    {
+        return mOverrideConfiguration;
+    }
+
+    @Override
+    public AssetManager getAssets()
+    {
+        return getResourcesInternal().getAssets();
+    }
+
+    @Override
+    public Resources getResources()
+    {
+        return getResourcesInternal();
+    }
+
+    private Resources getResourcesInternal()
+    {
+        if (mResources != null) return mResources;
+
+        if (mOverrideConfiguration == null)
+        {
+            Resources resources = super.getResources();
+            if (resources != null) mResourcesRequested = true;
+            return resources;
+        }
+
+        mResources = createConfigurationContext(mOverrideConfiguration).getResources();
+        return mResources;
+    }
+
     public int getThemeResId()
     {
         return mThemeResource;
+    }
+
+    public void setTheme(Resources.Theme theme)
+    {
+        mTheme = theme;
     }
 
     @Override

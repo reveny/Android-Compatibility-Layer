@@ -218,7 +218,7 @@ static Arm64Decoder::Result DecodeDataProcessingImmediate(Ir::Function& function
         if (shift == 1) immediate <<= 12;
         if (shift > 1) return Arm64Decoder::Result::Unallocated;
 
-        Ir::Value left = EmitReadGeneral(function, block, address, rn, type, !setFlags);
+        Ir::Value left = EmitReadGeneral(function, block, address, rn, type, true);
         Ir::Value right = EmitConstant(function, block, address, immediate, type);
         Ir::Value result = EmitBinary(function, block, address, subtract ? Ir::Opcode::Subtract : Ir::Opcode::Add, left, right, type);
 
@@ -695,7 +695,7 @@ static Arm64Decoder::Result DecodeDataProcessingRegister(Ir::Function& function,
 
         if (amount > 4) return Arm64Decoder::Result::Unallocated;
 
-        Ir::Value left = EmitReadGeneral(function, block, address, rn, type, !setFlags);
+        Ir::Value left = EmitReadGeneral(function, block, address, rn, type, true);
         Ir::Value raw = EmitReadGeneral(function, block, address, rm, Ir::ValueType::Int64, false);
 
         static const int EXTEND_BITS[] = {8, 16, 32, 64, 8, 16, 32, 64};
@@ -3290,10 +3290,31 @@ static Ir::ValueType VectorAccessType(uint32_t scale)
     return Ir::ValueType::Vector128;
 }
 
+static int64_t LiteralOffset(uint32_t encoding)
+{
+    int64_t immediate = (int64_t)((encoding >> 5) & 0x7ffff);
+    if (immediate & 0x40000) immediate -= 0x80000;
+    return immediate * 4;
+}
+
 static Arm64Decoder::Result DecodeVectorLoadStore(Ir::Function& function, Ir::Block& block, uint32_t encoding, GuestState::GuestAddress address)
 {
     uint32_t rt = encoding & 0x1f;
     uint32_t rn = (encoding >> 5) & 0x1f;
+
+    if ((encoding & 0x3f000000u) == 0x1c000000u)
+    {
+        uint32_t opc = (encoding >> 30) & 0x3;
+        if (opc == 3) return Arm64Decoder::Result::Unallocated;
+
+        uint64_t target = (uint64_t)address + (uint64_t)LiteralOffset(encoding);
+        Ir::Value pointer = EmitConstant(function, block, address, target, Ir::ValueType::Int64);
+
+        Ir::ValueType accessType = VectorAccessType(opc + 2);
+        Ir::Value loaded = EmitLoad(function, block, address, pointer, accessType, Ir::MemoryOrder::Relaxed);
+        EmitWriteVector(block, address, rt, loaded, accessType);
+        return Arm64Decoder::Result::Ok;
+    }
 
     if ((encoding & 0xbf000000u) == 0x0c000000u)
     {
@@ -3841,6 +3862,20 @@ static Arm64Decoder::Result DecodeLoadStore(Ir::Function& function, Ir::Block& b
     if ((encoding & 0xffc00000u) == 0xf9800000u || (encoding & 0xffe00c00u) == 0xf8a00800u ||
         (encoding & 0xffe00c00u) == 0xf8800000u || (encoding & 0xff000000u) == 0xd8000000u)
     {
+        return Arm64Decoder::Result::Ok;
+    }
+
+    if ((encoding & 0x3f000000u) == 0x18000000u)
+    {
+        uint32_t opc = (encoding >> 30) & 0x3;
+        if (opc == 3) return Arm64Decoder::Result::Ok;
+
+        uint64_t target = (uint64_t)address + (uint64_t)LiteralOffset(encoding);
+        Ir::Value pointer = EmitConstant(function, block, address, target, Ir::ValueType::Int64);
+
+        uint32_t size = opc == 1 ? 3 : 2;
+        Ir::Value loaded = EmitLoad(function, block, address, pointer, AccessType(size), Ir::MemoryOrder::Relaxed);
+        EmitExtendedWrite(function, block, address, rt, loaded, size, opc == 2 ? 2 : 1, true);
         return Arm64Decoder::Result::Ok;
     }
 

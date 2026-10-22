@@ -1,12 +1,26 @@
 package android.database.sqlite;
 
+import android.os.ParcelFileDescriptor;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+
 import runtime.Sqlite;
 
 public final class SQLiteStatement extends SQLiteProgram
 {
+    private final String mSql;
+
     SQLiteStatement(SQLiteDatabase database, long statement)
     {
+        this(database, statement, null);
+    }
+
+    SQLiteStatement(SQLiteDatabase database, long statement, String sql)
+    {
         super(database, statement);
+        mSql = sql;
     }
 
     public void execute()
@@ -17,7 +31,7 @@ public final class SQLiteStatement extends SQLiteProgram
     public long executeInsert()
     {
         step();
-        return Sqlite.nativeLastInsertRowId(mDatabase.handle());
+        return Sqlite.nativeChanges(mDatabase.handle()) > 0 ? Sqlite.nativeLastInsertRowId(mDatabase.handle()) : -1;
     }
 
     public int executeUpdateDelete()
@@ -28,7 +42,7 @@ public final class SQLiteStatement extends SQLiteProgram
 
     public long simpleQueryForLong()
     {
-        if (Sqlite.nativeStep(mStatement) != Sqlite.STEP_ROW) throw new SQLiteDoneException("the statement returned no rows");
+        stepForRow();
 
         long value = Sqlite.nativeColumnLong(mStatement, 0);
         Sqlite.nativeReset(mStatement);
@@ -38,20 +52,77 @@ public final class SQLiteStatement extends SQLiteProgram
 
     public String simpleQueryForString()
     {
-        if (Sqlite.nativeStep(mStatement) != Sqlite.STEP_ROW) throw new SQLiteDoneException("the statement returned no rows");
+        stepForRow();
 
-        String value = Sqlite.nativeColumnString(mStatement, 0);
+        String value = Sqlite.nativeColumnType(mStatement, 0) == Sqlite.TYPE_NULL ? null : Sqlite.nativeColumnString(mStatement, 0);
         Sqlite.nativeReset(mStatement);
 
         return value;
     }
 
-    private void step()
+    public ParcelFileDescriptor simpleQueryForBlobFileDescriptor()
     {
+        stepForRow();
+
+        byte[] value = Sqlite.nativeColumnType(mStatement, 0) == Sqlite.TYPE_NULL ? null : Sqlite.nativeColumnBlob(mStatement, 0);
+        Sqlite.nativeReset(mStatement);
+
+        if (value == null) return null;
+
+        try
+        {
+            File file = File.createTempFile("sqlite-blob", null);
+            try (FileOutputStream output = new FileOutputStream(file))
+            {
+                output.write(value);
+            }
+
+            ParcelFileDescriptor descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+            file.delete();
+
+            return descriptor;
+        }
+        catch (IOException failure)
+        {
+            throw new SQLiteException("unable to expose the blob as a file descriptor", failure);
+        }
+    }
+
+    @Override
+    public String toString()
+    {
+        return "SQLiteProgram: " + mSql;
+    }
+
+    private void stepForRow()
+    {
+        rebind();
+
         int outcome = Sqlite.nativeStep(mStatement);
         if (outcome == Sqlite.STEP_ERROR)
         {
-            throw new SQLiteException(Sqlite.nativeErrorMessage(mDatabase.handle()));
+            SQLiteException failure = mDatabase.failure(null);
+            Sqlite.nativeReset(mStatement);
+            throw failure;
+        }
+
+        if (outcome != Sqlite.STEP_ROW)
+        {
+            Sqlite.nativeReset(mStatement);
+            throw new SQLiteDoneException("the statement returned no rows");
+        }
+    }
+
+    private void step()
+    {
+        rebind();
+
+        int outcome = Sqlite.nativeStep(mStatement);
+        if (outcome == Sqlite.STEP_ERROR)
+        {
+            SQLiteException failure = mDatabase.failure(null);
+            Sqlite.nativeReset(mStatement);
+            throw failure;
         }
 
         Sqlite.nativeReset(mStatement);
