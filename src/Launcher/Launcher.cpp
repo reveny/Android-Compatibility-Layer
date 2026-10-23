@@ -72,9 +72,9 @@ void Launcher::PrintUsage(const char* program)
     fprintf(stderr, "  --fullscreen  ask the compositor for the whole output\n");
     fprintf(stderr, "  --aot         translate every arm64 image before the app starts, the default\n");
     fprintf(stderr, "  --jit         translate nothing ahead of time: interpret guest code, then compile hot regions as it runs\n");
-    fprintf(stderr, "                tune with --setting %s=N (default %llu), %s=N, %s=baseline|optimized, %s=0|1\n",
+    fprintf(stderr, "                tune with --setting %s=N (default %llu), %s=N, %s=baseline|optimized, %s=0|1, %s=N (default %llu)\n",
             JIT_THRESHOLD_SETTING, (unsigned long long)DEFAULT_JIT_THRESHOLD, JIT_REGION_BYTES_SETTING, JIT_TIER_SETTING,
-            JIT_BACKGROUND_SETTING);
+            JIT_BACKGROUND_SETTING, JIT_WORKERS_SETTING, (unsigned long long)GuestRuntime::DEFAULT_RECOMPILE_WORKERS);
     fprintf(stderr, "  --install     copy the apk into the data root and record it, then exit\n");
     fprintf(stderr, "  --launch <package>  run a package installed earlier, with its own data directory\n");
     fprintf(stderr, "  --uninstall <package>  forget a package and delete its data\n");
@@ -298,10 +298,12 @@ static bool JitSettingsValid()
 {
     uint64_t threshold = 0;
     uint64_t regionBytes = 0;
+    uint64_t workers = 0;
     LlvmBackend::Tier tier = LlvmBackend::Tier::Baseline;
 
     return UnsignedSetting(Launcher::JIT_THRESHOLD_SETTING, Launcher::DEFAULT_JIT_THRESHOLD, threshold) &&
            UnsignedSetting(Launcher::JIT_REGION_BYTES_SETTING, GuestRuntime::DEFAULT_RECOMPILE_REGION_BYTES, regionBytes) &&
+           UnsignedSetting(Launcher::JIT_WORKERS_SETTING, GuestRuntime::DEFAULT_RECOMPILE_WORKERS, workers) && workers != 0 &&
            JitTier(tier);
 }
 
@@ -2071,6 +2073,11 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
     configuration.checkJni = options.traceJni || Settings::Tracing("checkjni");
     configuration.reportOptions = options.traceJni;
 
+    const char* artJit = Settings::Lookup(ART_JIT_SETTING);
+    configuration.useJitCompilation = artJit == nullptr || strcmp(artJit, "0") != 0;
+    fprintf(stderr, "[launcher] the app's dex code is %s\n",
+            configuration.useJitCompilation ? "compiled by ART's JIT once it is hot" : "only interpreted, because art-jit=0");
+
     ArtRuntime::Vm vm;
     NameProcessAfterPackage(package.manifest.packageName);
 
@@ -2166,12 +2173,16 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
 
             const char* background = Settings::Lookup(JIT_BACKGROUND_SETTING);
             guestConfiguration.recompileInBackground = background == nullptr || strcmp(background, "0") != 0;
+            UnsignedSetting(JIT_WORKERS_SETTING, GuestRuntime::DEFAULT_RECOMPILE_WORKERS, guestConfiguration.recompileWorkers);
+
+            std::string compiledWhere = guestConfiguration.recompileInBackground
+                                            ? "on " + std::to_string(guestConfiguration.recompileWorkers) + " background thread(s)"
+                                            : std::string("on the thread that reached it");
 
             fprintf(stderr,
                     "[launcher] guest code is interpreted until a block has run %llu time(s), then compiled %s in regions of up to %llu "
                     "bytes at the %s tier; nothing is translated ahead of time\n",
-                    (unsigned long long)guestConfiguration.recompileThreshold,
-                    guestConfiguration.recompileInBackground ? "on a background thread" : "on the thread that reached it",
+                    (unsigned long long)guestConfiguration.recompileThreshold, compiledWhere.c_str(),
                     (unsigned long long)guestConfiguration.recompileRegionBytes, LlvmBackend::TierName(guestConfiguration.tier));
         }
 

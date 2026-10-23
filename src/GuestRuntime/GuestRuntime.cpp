@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <sys/mman.h>
 #include <thread>
@@ -34,6 +35,8 @@ static constexpr uint64_t GUEST_FAULT_SCAN_BYTES = 4096;
 static constexpr int GUEST_FAULT_SCAN_FRAMES = 40;
 static constexpr uint64_t SIGNAL_FRAME_GAP_BYTES = 512;
 static constexpr uint64_t RECENT_ENTRY_COUNT = 32;
+static constexpr uint64_t DISPATCH_CACHE_SLOTS = 4096;
+static constexpr uint64_t DISPATCH_HOTNESS_STRIDE = 16;
 static constexpr uint64_t FAULT_STACK_BYTES = 256 * 1024;
 static constexpr uint64_t BLOCK_TRACE_REPORTED = 64;
 static constexpr uint64_t SHUTDOWN_GRACE_MILLISECONDS = 2000;
@@ -356,16 +359,18 @@ struct GuestRuntimeState
     std::vector<LlvmBackend::CompiledFunction> retiredCode;
     uint64_t codeLowAddress = UINT64_MAX;
     uint64_t codeHighAddress = 0;
-    std::thread compiler;
+    std::vector<std::thread> compilers;
     std::mutex compileMutex;
     std::condition_variable compileWake;
     std::deque<uint64_t> compileQueue;
     std::unordered_set<uint64_t> compileQueued;
     bool compileStopping = false;
     std::unordered_map<uint64_t, TranslatedBlock> translatedBlocks;
+    std::atomic<bool> hasTranslatedBlocks{false};
     std::mutex translatedMutex;
     std::deque<Ir::Function> retired;
     uint64_t invalidationEpoch = 0;
+    uint64_t identity = 0;
     LlvmBackend::Session backend;
     bool backendReady = false;
     Arm64Decoder::Context decoder;
@@ -1110,7 +1115,7 @@ static NativeEntry RecompileAt(GuestRuntimeState* state, uint64_t address)
     return entry;
 }
 
-static NativeEntry NativeEntryFor(GuestRuntimeState* state, uint64_t address)
+static NativeEntry NativeEntryFor(GuestRuntimeState* state, uint64_t address, uint64_t observedHits)
 {
     if (!state->backendReady) return NativeEntry{};
 
@@ -1125,7 +1130,7 @@ static NativeEntry NativeEntryFor(GuestRuntimeState* state, uint64_t address)
         if (state->unrecompilable.count(address) != 0) return NativeEntry{};
         if (state->blocks.count(address) == 0) return NativeEntry{};
 
-        uint64_t hits = ++state->blockHits[address];
+        uint64_t hits = state->blockHits[address] += observedHits;
         if (hits < state->configuration.recompileThreshold) return NativeEntry{};
 
         if (state->configuration.recompileInBackground)
@@ -1171,7 +1176,7 @@ static void RunBackgroundCompiler(GuestRuntimeState* state)
 
 static void StopBackgroundCompiler(GuestRuntimeState* state)
 {
-    if (!state->compiler.joinable()) return;
+    if (state->compilers.empty()) return;
 
     {
         std::lock_guard<std::mutex> guard(state->compileMutex);
@@ -1179,7 +1184,13 @@ static void StopBackgroundCompiler(GuestRuntimeState* state)
     }
 
     state->compileWake.notify_all();
-    state->compiler.join();
+
+    for (std::thread& compiler : state->compilers)
+    {
+        if (compiler.joinable()) compiler.join();
+    }
+
+    state->compilers.clear();
 }
 
 static GuestRuntime::Result AllocateStackIn(GuestRuntimeState* state, uint64_t bytes, GuestState::GuestAddress& stackTop)
@@ -1239,6 +1250,31 @@ static thread_local uint64_t gGuestStackTop = 0;
 static thread_local uint64_t gGuestStackBytes = 0;
 static thread_local uint64_t gBlockTrace[LlvmBackend::BLOCK_TRACE_ENTRIES] = {};
 static thread_local uint64_t gBlockTraceCursor = 0;
+
+struct DispatchSlot
+{
+    uint64_t identity = 0;
+    uint64_t address = 0;
+    uint64_t epoch = 0;
+    const Ir::Block* block = nullptr;
+    NativeEntry native;
+    uint64_t reportedHits = 0;
+    uint64_t pendingHits = 0;
+};
+
+static std::atomic<uint64_t> gNextStateIdentity{1};
+static thread_local std::unique_ptr<DispatchSlot[]> gDispatchCache;
+
+static DispatchSlot& DispatchSlotFor(uint64_t address)
+{
+    if (!gDispatchCache) gDispatchCache.reset(new DispatchSlot[DISPATCH_CACHE_SLOTS]);
+    return gDispatchCache[(address >> 2) & (DISPATCH_CACHE_SLOTS - 1)];
+}
+
+static uint64_t CurrentEpoch(GuestRuntimeState* state)
+{
+    return std::atomic_ref<uint64_t>(state->invalidationEpoch).load(std::memory_order_acquire);
+}
 
 static void AttachBlockTrace(LlvmBackend::RuntimeContext& runtime)
 {
@@ -1850,6 +1886,7 @@ static GuestRuntime::Result CallGuestIn(GuestRuntimeState* state, GuestState::Gu
         Interpreter::ExitStatus status;
         TranslatedBlock translated;
 
+        if (state->hasTranslatedBlocks.load(std::memory_order_acquire))
         {
             std::lock_guard<std::mutex> guard(state->translatedMutex);
             auto found = state->translatedBlocks.find(cursor);
@@ -1882,20 +1919,56 @@ static GuestRuntime::Result CallGuestIn(GuestRuntimeState* state, GuestState::Gu
                 return GuestRuntime::Result::GuestFaulted;
             }
 
-            GuestRuntime::Result failure = GuestRuntime::Result::Ok;
-            block = BlockAt(state, cursor, failure);
-            if (!block)
-            {
-                fprintf(stderr,
-                        "[guestruntime %d] the guest branched to %016llx, which holds no code; it would return to %016llx (%s), and this "
-                        "call entered the guest at %016llx (%s)\n",
-                        (int)syscall(SYS_gettid), (unsigned long long)cursor, (unsigned long long)registers.general[30],
-                        DescribeGuestAddress(state, registers.general[30]).c_str(), (unsigned long long)entryAddress,
-                        DescribeGuestAddress(state, (uint64_t)entryAddress).c_str());
-                return failure;
-            }
+            const uint64_t epoch = CurrentEpoch(state);
+            DispatchSlot& slot = DispatchSlotFor(cursor);
+            NativeEntry native;
 
-            NativeEntry native = state->configuration.recompile ? NativeEntryFor(state, cursor) : NativeEntry{};
+            if (slot.identity == state->identity && slot.address == cursor && slot.epoch == epoch)
+            {
+                block = slot.block;
+                native = slot.native;
+
+                if (!native.hostEntry && state->configuration.recompile)
+                {
+                    slot.pendingHits += 1;
+
+                    const uint64_t threshold = state->configuration.recompileThreshold;
+
+                    if (slot.pendingHits >= DISPATCH_HOTNESS_STRIDE ||
+                        (slot.reportedHits < threshold && slot.reportedHits + slot.pendingHits >= threshold))
+                    {
+                        native = NativeEntryFor(state, cursor, slot.pendingHits);
+                        slot.reportedHits += slot.pendingHits;
+                        slot.pendingHits = 0;
+                        slot.native = native;
+                    }
+                }
+            }
+            else
+            {
+                GuestRuntime::Result failure = GuestRuntime::Result::Ok;
+                block = BlockAt(state, cursor, failure);
+                if (!block)
+                {
+                    fprintf(stderr,
+                            "[guestruntime %d] the guest branched to %016llx, which holds no code; it would return to %016llx (%s), and "
+                            "this call entered the guest at %016llx (%s)\n",
+                            (int)syscall(SYS_gettid), (unsigned long long)cursor, (unsigned long long)registers.general[30],
+                            DescribeGuestAddress(state, registers.general[30]).c_str(), (unsigned long long)entryAddress,
+                            DescribeGuestAddress(state, (uint64_t)entryAddress).c_str());
+                    return failure;
+                }
+
+                native = state->configuration.recompile ? NativeEntryFor(state, cursor, 1) : NativeEntry{};
+
+                slot.identity = state->identity;
+                slot.address = cursor;
+                slot.epoch = epoch;
+                slot.block = block;
+                slot.native = native;
+                slot.reportedHits = 1;
+                slot.pendingHits = 0;
+            }
 
             if (native.hostEntry)
             {
@@ -2086,6 +2159,7 @@ static void MapSentinelReturnPage(uint64_t pageBytes)
 GuestRuntime::Result GuestRuntime::Create(const Configuration& configuration, Instance& instance)
 {
     GuestRuntimeState* state = new GuestRuntimeState();
+    state->identity = gNextStateIdentity.fetch_add(1, std::memory_order_relaxed);
     state->configuration = configuration;
     state->pageBytes = Platform::HostPageBytes();
 
@@ -2204,7 +2278,11 @@ GuestRuntime::Result GuestRuntime::Create(const Configuration& configuration, In
 
         state->backendReady = true;
 
-        if (configuration.recompileInBackground) state->compiler = std::thread(&RunBackgroundCompiler, state);
+        if (configuration.recompileInBackground)
+        {
+            uint64_t workers = configuration.recompileWorkers == 0 ? 1 : configuration.recompileWorkers;
+            for (uint64_t worker = 0; worker < workers; ++worker) state->compilers.emplace_back(&RunBackgroundCompiler, state);
+        }
     }
 
     return Result::Ok;
@@ -2381,6 +2459,7 @@ GuestRuntime::Result GuestRuntime::RegisterTranslatedBlock(Instance& instance, G
 
     std::lock_guard<std::mutex> guard(state->translatedMutex);
     state->translatedBlocks[(uint64_t)blockAddress] = translated;
+    state->hasTranslatedBlocks.store(true, std::memory_order_release);
 
     return Result::Ok;
 }
@@ -2691,7 +2770,7 @@ static uint64_t InvalidateRange(GuestRuntimeState* state, uint64_t start, uint64
 
     if (end <= state->codeLowAddress || start >= state->codeHighAddress) return dropped;
 
-    state->invalidationEpoch += 1;
+    std::atomic_ref<uint64_t>(state->invalidationEpoch).fetch_add(1, std::memory_order_acq_rel);
     Bump(state->statistics.codeInvalidations);
 
     for (auto entry = state->blocks.begin(); entry != state->blocks.end();)

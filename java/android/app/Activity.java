@@ -1479,6 +1479,7 @@ public class Activity extends ContextThemeWrapper implements LayoutInflater.Fact
     void dispatchLifecycleResumed()
     {
         mFragmentManager.dispatchResume();
+        onPostResume();
 
         for (Application.ActivityLifecycleCallbacks callback : collectLifecycleCallbacks())
         {

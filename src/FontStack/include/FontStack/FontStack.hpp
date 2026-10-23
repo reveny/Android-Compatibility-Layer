@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 
 namespace FontStack
 {
@@ -50,8 +51,7 @@ namespace FontStack
         StyleTableFull,
         FontTableFull,
         ShapingFailed,
-        RasterizationFailed,
-        WrongThread
+        RasterizationFailed
     };
 
     struct Metrics
@@ -92,6 +92,7 @@ namespace FontStack
     Result Initialize(const char* fontDirectory);
     void Shutdown();
     bool IsInitialized();
+    std::recursive_mutex& Mutex();
 
     Result ResolveFamily(const char* familyName, int weight, bool italic, uint32_t& font);
     Result LoadFontFromMemory(const uint8_t* bytes, size_t byteCount, int weight, bool italic, uint32_t& font);

@@ -404,6 +404,7 @@ public class ContextImpl extends Context
             case Context.SYSTEM_HEALTH_SERVICE: return new android.os.health.SystemHealthManager();
             case Context.POWER_WHITELIST_MANAGER: return new android.os.PowerWhitelistManager(this);
             case Context.POWER_EXEMPTION_SERVICE: return new android.os.PowerExemptionManager(this);
+            case Context.CREDENTIAL_SERVICE: return new android.credentials.CredentialManager(this);
             default: return null;
         }
     }

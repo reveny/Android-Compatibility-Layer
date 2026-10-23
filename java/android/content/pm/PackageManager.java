@@ -964,10 +964,19 @@ public class PackageManager
 
     private final java.util.Map<String, Integer> mComponentState = new java.util.HashMap<>();
 
+    private void requireInstalledComponent(ComponentName component)
+    {
+        if (!mApplicationInfo.packageName.equals(component.getPackageName()))
+        {
+            throw new IllegalArgumentException("Unknown component: " + component);
+        }
+    }
+
     public void setComponentEnabledSetting(ComponentName component, int newState, int flags)
     {
         if (component == null) return;
 
+        requireInstalledComponent(component);
         mComponentState.put(component.flattenToString(), newState);
         android.util.Log.i(TAG, "component " + component.getClassName() + " set to state " + newState);
     }
@@ -986,6 +995,7 @@ public class PackageManager
     {
         if (component == null) return COMPONENT_ENABLED_STATE_DEFAULT;
 
+        requireInstalledComponent(component);
         Integer state = mComponentState.get(component.flattenToString());
         return state == null ? COMPONENT_ENABLED_STATE_DEFAULT : state;
     }
@@ -996,6 +1006,8 @@ public class PackageManager
 
     public int getApplicationEnabledSetting(String packageName)
     {
+        if (!mApplicationInfo.packageName.equals(packageName)) throw new IllegalArgumentException("Unknown package: " + packageName);
+
         return COMPONENT_ENABLED_STATE_DEFAULT;
     }
 

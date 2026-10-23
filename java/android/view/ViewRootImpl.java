@@ -822,6 +822,12 @@ public final class ViewRootImpl implements Choreographer.FrameCallback, ViewPare
 
         String detail = "";
         if (view.getVisibility() != View.VISIBLE) detail += " visibility=" + view.getVisibility();
+        if (view.getAlpha() != 1f) detail += " alpha=" + view.getAlpha();
+        if (view.getTranslationX() != 0f || view.getTranslationY() != 0f)
+        {
+            detail += " translation=" + view.getTranslationX() + "," + view.getTranslationY();
+        }
+        if (view.getBackground() != null) detail += " background=" + view.getBackground().getClass().getName();
         if (view instanceof android.widget.TextView)
         {
             android.widget.TextView text = (android.widget.TextView)view;

@@ -1,5 +1,6 @@
 #include "FrameworkJni/TextBridge.hpp"
 
+#include <atomic>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -7,8 +8,8 @@
 #include "FontStack/FontStack.hpp"
 #include "FrameworkJni/FrameworkJni.hpp"
 
-static bool gStarted = false;
-static bool gStartFailed = false;
+static std::atomic<bool> gStarted{false};
+static std::atomic<bool> gStartFailed{false};
 
 static void ReportTextFailure(JNIEnv* env, const char* what, FontStack::Result result);
 

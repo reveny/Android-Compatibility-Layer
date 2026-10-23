@@ -134,9 +134,9 @@ hot=$(run hot --setting jit-threshold=0)
 hotStatus=$?
 check_common hot "$hot" "$hotStatus"
 
-if ! contains "compiled on a background thread" "$hot"; then
+if ! contains "compiled on 4 background thread(s)" "$hot"; then
     echo "$hot"
-    echo "gate FAILED: hot: the run-time compiler did not default to a background thread" >&2
+    echo "gate FAILED: hot: the run-time compiler did not default to its background threads" >&2
     exit 1
 fi
 

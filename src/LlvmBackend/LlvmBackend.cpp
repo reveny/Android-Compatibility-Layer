@@ -3534,7 +3534,7 @@ LlvmBackend::Result LlvmBackend::Initialize(const Configuration& configuration, 
     LlvmBackendSession* implementation = new LlvmBackendSession();
     implementation->configuration = configuration;
 
-    llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> built = llvm::orc::LLJITBuilder().create();
+    llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> built = llvm::orc::LLJITBuilder().setSupportConcurrentCompilation(true).create();
     if (!built)
     {
         llvm::consumeError(built.takeError());
@@ -3623,17 +3623,23 @@ LlvmBackend::Result LlvmBackend::CompileFunction(Session& session, const Ir::Fun
     Ir::Opcode unsupported = Ir::Opcode::Invalid;
     bool lowerable = CanLower(function, unsupported);
 
-    std::lock_guard<std::mutex> guard(implementation->mutex);
-
     if (!lowerable)
     {
+        std::lock_guard<std::mutex> guard(implementation->mutex);
         implementation->statistics.functionsRejected += 1;
         compiled.result = Result::UnsupportedOpcode;
         return Result::UnsupportedOpcode;
     }
 
+    uint64_t moduleNumber = 0;
+
+    {
+        std::lock_guard<std::mutex> guard(implementation->mutex);
+        moduleNumber = implementation->nextModule++;
+    }
+
     auto context = std::make_unique<llvm::LLVMContext>();
-    std::string name = "acl_" + std::to_string((uint64_t)function.entryAddress) + "_" + std::to_string(implementation->nextModule++);
+    std::string name = "acl_" + std::to_string((uint64_t)function.entryAddress) + "_" + std::to_string(moduleNumber);
     auto module = std::make_unique<llvm::Module>(name, *context);
     module->setDataLayout(implementation->jit->getDataLayout());
 
@@ -3657,6 +3663,7 @@ LlvmBackend::Result LlvmBackend::CompileFunction(Session& session, const Ir::Fun
 
     if (!LowerFunction(lowering, function))
     {
+        std::lock_guard<std::mutex> guard(implementation->mutex);
         implementation->statistics.functionsRejected += 1;
         compiled.result = Result::LoweringFailed;
         return Result::LoweringFailed;
@@ -3664,6 +3671,7 @@ LlvmBackend::Result LlvmBackend::CompileFunction(Session& session, const Ir::Fun
 
     if (implementation->configuration.verifyModule && llvm::verifyFunction(*entry, &llvm::errs()))
     {
+        std::lock_guard<std::mutex> guard(implementation->mutex);
         implementation->statistics.functionsRejected += 1;
         compiled.result = Result::VerificationFailed;
         return Result::VerificationFailed;
@@ -3671,7 +3679,11 @@ LlvmBackend::Result LlvmBackend::CompileFunction(Session& session, const Ir::Fun
 
     OptimizeFunction(*entry, tier);
 
-    if (implementation->configuration.emitIrToStderr) module->print(llvm::errs(), nullptr);
+    if (implementation->configuration.emitIrToStderr)
+    {
+        std::lock_guard<std::mutex> guard(implementation->mutex);
+        module->print(llvm::errs(), nullptr);
+    }
 
     llvm::orc::ResourceTrackerSP tracker = implementation->jit->getMainJITDylib().createResourceTracker();
 
@@ -3700,6 +3712,7 @@ LlvmBackend::Result LlvmBackend::CompileFunction(Session& session, const Ir::Fun
     compiled.result = Result::Ok;
     compiled.release = new llvm::orc::ResourceTrackerSP(tracker);
 
+    std::lock_guard<std::mutex> guard(implementation->mutex);
     implementation->statistics.functionsCompiled += 1;
     implementation->statistics.blocksLowered += function.blocks.size();
     implementation->statistics.instructionsLowered += lowering.instructionsLowered;

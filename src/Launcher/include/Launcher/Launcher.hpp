@@ -21,7 +21,9 @@ namespace Launcher
     inline constexpr const char* JIT_REGION_BYTES_SETTING = "jit-region-bytes";
     inline constexpr const char* JIT_TIER_SETTING = "jit-tier";
     inline constexpr const char* JIT_BACKGROUND_SETTING = "jit-background";
+    inline constexpr const char* JIT_WORKERS_SETTING = "jit-workers";
     inline constexpr uint64_t DEFAULT_JIT_THRESHOLD = 64;
+    inline constexpr const char* ART_JIT_SETTING = "art-jit";
     inline constexpr const char* NO_SANDBOX_SETTING = "no-sandbox";
     inline constexpr const char* NETWORK_SETTING = "network";
     inline constexpr const char* ISOLATED_SETTING = "isolated";

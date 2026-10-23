@@ -810,6 +810,7 @@ static void CanvasDrawTextRun(JNIEnv* env, jclass, jlong handle, jint style, jch
     std::vector<uint16_t> chars(static_cast<size_t>(count));
     env->GetCharArrayRegion(text, index, count, reinterpret_cast<jchar*>(chars.data()));
 
+    std::lock_guard<std::recursive_mutex> guard(FontStack::Mutex());
     uint64_t run = FontStack::INVALID_RUN;
     if (FontStack::ShapeRun(static_cast<uint32_t>(style), chars.data(), count, rightToLeft == JNI_TRUE, run) != FontStack::Result::Ok)
     {

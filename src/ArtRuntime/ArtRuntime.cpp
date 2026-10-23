@@ -121,7 +121,7 @@ ArtRuntime::Result ArtRuntime::Start(const Configuration& configuration, Vm& vm)
 
     std::string libraryFile = configuration.hostRoot + "/lib64/" + RUNTIME_LIBRARY;
     dlerror();
-    vm.libraryHandle = dlopen(libraryFile.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    vm.libraryHandle = dlopen(libraryFile.c_str(), RTLD_NOW | RTLD_GLOBAL | RTLD_DEEPBIND);
     if (!vm.libraryHandle)
     {
         const char* error = dlerror();

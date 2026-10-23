@@ -5,7 +5,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <ft2build.h>
@@ -58,13 +57,8 @@ static std::vector<FontEntry> gFonts;
 static std::vector<StyleEntry> gStyles;
 static std::vector<RunEntry> gRuns;
 static std::vector<size_t> gFreeRuns;
-static std::thread::id gOwnerThread;
+static std::recursive_mutex gMutex;
 static bool gInitialized = false;
-
-static bool OnOwnerThread()
-{
-    return std::this_thread::get_id() == gOwnerThread;
-}
 
 static float ClampTextSize(float textSize)
 {
@@ -218,8 +212,14 @@ static bool ReadFile(const std::string& path, std::vector<uint8_t>& bytes)
     return got == bytes.size();
 }
 
+std::recursive_mutex& FontStack::Mutex()
+{
+    return gMutex;
+}
+
 FontStack::Result FontStack::Initialize(const char* fontDirectory)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     if (gInitialized) return Result::AlreadyInitialized;
 
     const char* directory = fontDirectory;
@@ -233,13 +233,13 @@ FontStack::Result FontStack::Initialize(const char* fontDirectory)
     if (FT_Init_FreeType(&gLibrary) != 0) return Result::RasterizationFailed;
 
     gFontDirectory = directory;
-    gOwnerThread = std::this_thread::get_id();
     gInitialized = true;
     return Result::Ok;
 }
 
 void FontStack::Shutdown()
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     if (!gInitialized) return;
 
     ShapeCache::Clear();
@@ -263,13 +263,14 @@ void FontStack::Shutdown()
 
 bool FontStack::IsInitialized()
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     return gInitialized;
 }
 
 FontStack::Result FontStack::ResolveFamily(const char* familyName, int weight, bool italic, uint32_t& font)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     if (!gInitialized) return Result::NotInitialized;
-    if (!OnOwnerThread()) return Result::WrongThread;
 
     FontRegistry::Selection selection;
     if (!FontRegistry::Resolve(familyName, weight, italic, selection)) return Result::UnknownFamily;
@@ -295,8 +296,8 @@ FontStack::Result FontStack::ResolveFamily(const char* familyName, int weight, b
 
 FontStack::Result FontStack::LoadFontFromMemory(const uint8_t* fontBytes, size_t byteCount, int weight, bool italic, uint32_t& font)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     if (!gInitialized) return Result::NotInitialized;
-    if (!OnOwnerThread()) return Result::WrongThread;
     if (!fontBytes || byteCount == 0) return Result::InvalidArgument;
     if (byteCount > MAX_FONT_FILE_BYTES) return Result::FontFileTooLarge;
 
@@ -312,6 +313,7 @@ FontStack::Result FontStack::LoadFontFromMemory(const uint8_t* fontBytes, size_t
 
 FontStack::Result FontStack::FontWeight(uint32_t font, int& weight)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     FontEntry* entry = FontFrom(font);
     if (!entry) return Result::InvalidFont;
 
@@ -321,6 +323,7 @@ FontStack::Result FontStack::FontWeight(uint32_t font, int& weight)
 
 FontStack::Result FontStack::FontIsItalic(uint32_t font, bool& italic)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     FontEntry* entry = FontFrom(font);
     if (!entry) return Result::InvalidFont;
 
@@ -331,8 +334,8 @@ FontStack::Result FontStack::FontIsItalic(uint32_t font, bool& italic)
 FontStack::Result FontStack::InternStyle(uint32_t font, float textSize, float scaleX, float skewX, float letterSpacing, int flags,
                                          uint32_t& style)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     if (!gInitialized) return Result::NotInitialized;
-    if (!OnOwnerThread()) return Result::WrongThread;
     if (!FontFrom(font)) return Result::InvalidFont;
 
     float clamped = ClampTextSize(textSize);
@@ -371,8 +374,8 @@ static RunEntry* RunFrom(uint64_t run);
 static FontStack::Result ShapeInternal(uint32_t style, const uint16_t* text, int32_t count, bool rightToLeft,
                                        std::vector<FontStack::GlyphPosition>& glyphs, float& advance)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     if (!gInitialized) return FontStack::Result::NotInitialized;
-    if (!OnOwnerThread()) return FontStack::Result::WrongThread;
     if (!text && count > 0) return FontStack::Result::InvalidArgument;
     if (count < 0) return FontStack::Result::InvalidArgument;
     if (count > FontStack::MAX_RUN_LENGTH) return FontStack::Result::TextTooLong;
@@ -435,6 +438,7 @@ static FontStack::Result ShapeInternal(uint32_t style, const uint16_t* text, int
 
 FontStack::Result FontStack::MeasureText(uint32_t style, const uint16_t* text, int32_t count, float& advance)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     std::vector<GlyphPosition> glyphs;
     Result shaped = ShapeInternal(style, text, count, false, glyphs, advance);
     if (shaped != Result::Ok) return shaped;
@@ -445,6 +449,7 @@ FontStack::Result FontStack::MeasureText(uint32_t style, const uint16_t* text, i
 
 FontStack::Result FontStack::TextWidths(uint32_t style, const uint16_t* text, int32_t count, float* outWidths, int32_t& written)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     written = 0;
     if (!outWidths && count > 0) return Result::InvalidArgument;
 
@@ -472,8 +477,8 @@ FontStack::Result FontStack::TextWidths(uint32_t style, const uint16_t* text, in
 
 FontStack::Result FontStack::FontMetrics(uint32_t style, Metrics& metrics)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     if (!gInitialized) return Result::NotInitialized;
-    if (!OnOwnerThread()) return Result::WrongThread;
 
     StyleEntry* entry = StyleFrom(style);
     if (!entry) return Result::InvalidStyle;
@@ -496,6 +501,7 @@ FontStack::Result FontStack::FontMetrics(uint32_t style, Metrics& metrics)
 
 FontStack::Result FontStack::TextBounds(uint32_t style, const uint16_t* text, int32_t count, Bounds& bounds)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     std::vector<GlyphPosition> glyphs;
     float advance = 0.0f;
     Result shaped = ShapeInternal(style, text, count, false, glyphs, advance);
@@ -537,6 +543,7 @@ FontStack::Result FontStack::TextBounds(uint32_t style, const uint16_t* text, in
 FontStack::Result FontStack::BreakText(uint32_t style, const uint16_t* text, int32_t count, float maxWidth, bool forwards,
                                        int32_t& breakAt, float& measuredWidth)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     breakAt = 0;
     measuredWidth = 0.0f;
 
@@ -579,6 +586,7 @@ FontStack::Result FontStack::BreakText(uint32_t style, const uint16_t* text, int
 
 FontStack::Result FontStack::HasGlyph(uint32_t style, const uint16_t* text, int32_t count, bool& present)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     present = false;
 
     std::vector<GlyphPosition> glyphs;
@@ -594,6 +602,7 @@ FontStack::Result FontStack::HasGlyph(uint32_t style, const uint16_t* text, int3
 
 FontStack::Result FontStack::ShapeRun(uint32_t style, const uint16_t* text, int32_t count, bool rightToLeft, uint64_t& run)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     run = INVALID_RUN;
 
     uint64_t cached = INVALID_RUN;
@@ -654,6 +663,7 @@ static RunEntry* RunFrom(uint64_t run)
 
 FontStack::Result FontStack::RunAdvance(uint64_t run, float& advance)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     RunEntry* entry = RunFrom(run);
     if (!entry) return Result::InvalidRun;
 
@@ -663,6 +673,7 @@ FontStack::Result FontStack::RunAdvance(uint64_t run, float& advance)
 
 FontStack::Result FontStack::RunGlyphCount(uint64_t run, int32_t& count)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     RunEntry* entry = RunFrom(run);
     if (!entry) return Result::InvalidRun;
 
@@ -672,6 +683,7 @@ FontStack::Result FontStack::RunGlyphCount(uint64_t run, int32_t& count)
 
 FontStack::Result FontStack::RunGlyph(uint64_t run, int32_t index, GlyphPosition& position)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     RunEntry* entry = RunFrom(run);
     if (!entry) return Result::InvalidRun;
     if (index < 0 || index >= static_cast<int32_t>(entry->glyphs.size())) return Result::InvalidArgument;
@@ -682,6 +694,7 @@ FontStack::Result FontStack::RunGlyph(uint64_t run, int32_t index, GlyphPosition
 
 FontStack::Result FontStack::ReleaseRun(uint64_t run)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     RunEntry* entry = RunFrom(run);
     if (!entry) return Result::InvalidRun;
 
@@ -694,8 +707,8 @@ FontStack::Result FontStack::ReleaseRun(uint64_t run)
 
 FontStack::Result FontStack::RasterizeGlyph(uint32_t style, uint32_t glyphId, GlyphImage& image)
 {
+    std::lock_guard<std::recursive_mutex> guard(gMutex);
     if (!gInitialized) return Result::NotInitialized;
-    if (!OnOwnerThread()) return Result::WrongThread;
 
     StyleEntry* entry = StyleFrom(style);
     if (!entry) return Result::InvalidStyle;
@@ -743,7 +756,6 @@ const char* FontStack::ResultName(Result result)
         case Result::FontTableFull: return "FontTableFull";
         case Result::ShapingFailed: return "ShapingFailed";
         case Result::RasterizationFailed: return "RasterizationFailed";
-        case Result::WrongThread: return "WrongThread";
     }
 
     return "Unknown";

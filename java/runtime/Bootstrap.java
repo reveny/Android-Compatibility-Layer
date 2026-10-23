@@ -42,9 +42,34 @@ public final class Bootstrap
         return sApplication;
     }
 
+    private static final String CRASH_TAG = "AndroidRuntime";
+
+    private static void installCrashLogger()
+    {
+        Thread.UncaughtExceptionHandler logger = new Thread.UncaughtExceptionHandler()
+        {
+            @Override
+            public void uncaughtException(Thread thread, Throwable cause)
+            {
+                Log.e(CRASH_TAG, "FATAL EXCEPTION: " + thread.getName(), cause);
+            }
+        };
+
+        try
+        {
+            Thread.class.getMethod("setUncaughtExceptionPreHandler", Thread.UncaughtExceptionHandler.class).invoke(null, logger);
+        }
+        catch (ReflectiveOperationException unavailable)
+        {
+            Log.w(TAG, "uncaught exceptions are not logged, the runtime has no pre-handler: " + unavailable);
+        }
+    }
+
     public static int start(String dataDir, String nativeLibraryDir)
     {
         ClassLoader loader = Bootstrap.class.getClassLoader();
+
+        installCrashLogger();
 
         TextMeasurers.install(new NativeTextMeasurer());
 

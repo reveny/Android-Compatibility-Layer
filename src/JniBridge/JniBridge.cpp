@@ -1144,8 +1144,17 @@ static bool BuildCallArguments(const std::vector<char>& letters, VarargCursor& c
 
             case 'F':
             {
-                uint32_t bits = (uint32_t)NextVector(cursor);
-                memcpy(&value.f, &bits, sizeof(value.f));
+                if (cursor.variant == CallVariant::Array)
+                {
+                    uint32_t bits = (uint32_t)NextVector(cursor);
+                    memcpy(&value.f, &bits, sizeof(value.f));
+                    break;
+                }
+
+                uint64_t bits = NextVector(cursor);
+                double promoted;
+                memcpy(&promoted, &bits, sizeof(promoted));
+                value.f = (jfloat)promoted;
                 break;
             }
 

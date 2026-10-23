@@ -135,6 +135,8 @@ public final class MessageQueue
 
     Message next()
     {
+        boolean idleHandlersRan = false;
+
         for (;;)
         {
             long waitMillis;
@@ -157,7 +159,7 @@ public final class MessageQueue
 
                 waitMillis = mMessages == null ? -1 : mMessages.when - now;
                 poller = mPoller;
-                idle = !mIdleHandlers.isEmpty();
+                idle = !idleHandlersRan && !mIdleHandlers.isEmpty();
 
                 if (poller == null && !idle)
                 {
@@ -172,6 +174,7 @@ public final class MessageQueue
             if (idle)
             {
                 runIdleHandlers();
+                idleHandlersRan = true;
 
                 synchronized (this)
                 {
