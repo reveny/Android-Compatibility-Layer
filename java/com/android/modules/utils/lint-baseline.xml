@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.4.0-alpha01" type="baseline" client="" dependencies="true" name="" variant="all" version="8.4.0-alpha01">
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 31 (current min is 29): `libcore.util.HexEncoding#encodeToString`"
+        errorLine1="            builder.append(HexEncoding.encodeToString(this.value));"
+        errorLine2="                                       ~~~~~~~~~~~~~~">
+        <location
+            file="frameworks/libs/modules-utils/java/com/android/modules/utils/BytesMatcher.java"
+            line="76"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 31 (current min is 29): `libcore.util.HexEncoding#encodeToString`"
+        errorLine1="                builder.append(HexEncoding.encodeToString(this.mask));"
+        errorLine2="                                           ~~~~~~~~~~~~~~">
+        <location
+            file="frameworks/libs/modules-utils/java/com/android/modules/utils/BytesMatcher.java"
+            line="79"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 31 (current min is 29): `libcore.util.HexEncoding#decode`"
+        errorLine1="                ruleValue = HexEncoding.decode(value.substring(i + 1, nextMask));"
+        errorLine2="                                        ~~~~~~">
+        <location
+            file="frameworks/libs/modules-utils/java/com/android/modules/utils/BytesMatcher.java"
+            line="267"
+            column="41"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 31 (current min is 29): `libcore.util.HexEncoding#decode`"
+        errorLine1="                ruleMask = HexEncoding.decode(value.substring(nextMask + 1, nextRule));"
+        errorLine2="                                       ~~~~~~">
+        <location
+            file="frameworks/libs/modules-utils/java/com/android/modules/utils/BytesMatcher.java"
+            line="268"
+            column="40"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 31 (current min is 29): `libcore.util.HexEncoding#decode`"
+        errorLine1="                ruleValue = HexEncoding.decode(value.substring(i + 1, nextRule));"
+        errorLine2="                                        ~~~~~~">
+        <location
+            file="frameworks/libs/modules-utils/java/com/android/modules/utils/BytesMatcher.java"
+            line="270"
+            column="41"/>
+    </issue>
+
+</issues>

@@ -9,7 +9,8 @@ import android.util.DisplayMetrics;
 import java.util.Arrays;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
-
+import android.annotation.Nullable;
+import android.hardware.display.DeviceProductInfo;
 public final class Display
 {
     public static final int DEFAULT_DISPLAY = 0;
@@ -110,6 +111,10 @@ public final class Display
     public boolean hasArrSupport()
     {
         return false;
+    }
+    @Nullable
+    public DeviceProductInfo getDeviceProductInfo() {
+        return null;
     }
 
     public Mode getMode()

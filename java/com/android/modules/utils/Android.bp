@@ -1,0 +1,126 @@
+//
+// Copyright (C) 2020 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+java_defaults {
+    name: "modules-utils-defaults",
+    sdk_version: "module_current",
+    min_sdk_version: "29",
+    libs: ["framework-annotations-lib"],
+    visibility: ["//visibility:public"],
+    apex_available: [
+        "//apex_available:anyapex",
+        "//apex_available:platform",
+    ],
+    defaults_visibility: [
+        "//frameworks/libs/modules-utils/java:__subpackages__",
+    ],
+}
+
+java_library {
+    name: "modules-utils-os",
+    defaults: ["modules-utils-defaults"],
+    min_sdk_version: "30",
+    static_libs: [
+        "modules-utils-list-slice",
+        "modules-utils-shell-command-handler",
+    ],
+    visibility: [
+        // NOTE: Do not add new rules to this list. New users should use the separate libraries it
+        // consists of.
+        "//visibility:override",
+        "//frameworks/base",
+        "//packages/modules/Connectivity/service",
+        "//packages/modules/Permission/service",
+        "//packages/modules/Scheduling/service",
+        "//packages/modules/Wifi/framework",
+        "//packages/modules/Wifi/service",
+        "//packages/services/Car/service",
+        "//packages/services/Telephony",
+    ],
+}
+
+java_library {
+    name: "modules-utils-handlerexecutor",
+    defaults: ["modules-utils-defaults"],
+    srcs: ["HandlerExecutor.java"],
+}
+
+java_library {
+    name: "modules-utils-backgroundthread",
+    defaults: ["modules-utils-defaults"],
+    srcs: ["BackgroundThread.java"],
+    static_libs: ["modules-utils-handlerexecutor"],
+}
+
+java_library {
+    name: "modules-utils-binary-xml",
+    defaults: ["modules-utils-defaults"],
+    min_sdk_version: "31",
+    srcs: [
+        "BinaryXmlPullParser.java",
+        "BinaryXmlSerializer.java",
+        "FastDataInput.java",
+        "FastDataOutput.java",
+        "ModifiedUtf8.java",
+        "TypedXmlPullParser.java",
+        "TypedXmlSerializer.java",
+    ],
+}
+
+java_library {
+    name: "modules-utils-bytesmatcher",
+    defaults: ["modules-utils-defaults"],
+    srcs: ["BytesMatcher.java"],
+    lint: {
+        baseline_filename: "lint-baseline.xml",
+    },
+}
+
+java_library {
+    name: "modules-utils-list-slice",
+    defaults: ["modules-utils-defaults"],
+    srcs: [
+        ":module-utils-os-aidls",
+        "BaseParceledListSlice.java",
+        "ParceledListSlice.java",
+        "StringParceledListSlice.java",
+    ],
+    min_sdk_version: "30",
+}
+
+java_library {
+    name: "modules-utils-shell-command-handler",
+    defaults: ["modules-utils-defaults"],
+    srcs: ["BasicShellCommandHandler.java"],
+}
+
+java_library {
+    name: "modules-utils-infra",
+    defaults: ["modules-utils-defaults"],
+    srcs: [
+        "AndroidFuture.java",
+        "ServiceConnector.java",
+        ":module-utils-future-aidls",
+    ],
+    static_libs: [
+        "modules-utils-handlerexecutor",
+        "modules-utils-preconditions",
+    ],
+    min_sdk_version: "33",
+}

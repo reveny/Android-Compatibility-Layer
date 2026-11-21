@@ -1,0 +1,14 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+java_library {
+    name: "modules-utils-ravenwood",
+    srcs: ["*.java"],
+    libs: [
+        "ravenwood-annotations-lib",
+    ],
+    host_supported: true,
+    sdk_version: "core_current",
+    defaults: ["modules-utils-defaults"],
+}

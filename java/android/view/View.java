@@ -2125,35 +2125,7 @@ public class View implements android.view.accessibility.AccessibilityEventSource
 
     public void setBackground(android.graphics.drawable.Drawable background)
     {
-        if (mBackground == background) return;
-
-        if (mBackground != null) mBackground.setCallback(null);
-
-        mBackground = background;
-
-        if (background == null)
-        {
-            mHasBackground = false;
-            invalidate();
-            return;
-        }
-
-        background.setCallback(this);
-        background.setBounds(0, 0, getWidth(), getHeight());
-
-        if (background.isStateful()) background.setState(getDrawableState());
-
-        if (background instanceof android.graphics.drawable.ColorDrawable)
-        {
-            mBackgroundColor = ((android.graphics.drawable.ColorDrawable)background).getColor();
-            mHasBackground = true;
-        }
-        else
-        {
-            mHasBackground = false;
-        }
-
-        invalidate();
+        setBackgroundDrawable(background);
     }
 
     public android.graphics.drawable.Drawable getBackground()
@@ -2308,7 +2280,35 @@ public class View implements android.view.accessibility.AccessibilityEventSource
 
     public void setBackgroundDrawable(android.graphics.drawable.Drawable background)
     {
-        setBackground(background);
+        if (mBackground == background) return;
+
+        if (mBackground != null) mBackground.setCallback(null);
+
+        mBackground = background;
+
+        if (background == null)
+        {
+            mHasBackground = false;
+            invalidate();
+            return;
+        }
+
+        background.setCallback(this);
+        background.setBounds(0, 0, getWidth(), getHeight());
+
+        if (background.isStateful()) background.setState(getDrawableState());
+
+        if (background instanceof android.graphics.drawable.ColorDrawable)
+        {
+            mBackgroundColor = ((android.graphics.drawable.ColorDrawable)background).getColor();
+            mHasBackground = true;
+        }
+        else
+        {
+            mHasBackground = false;
+        }
+
+        invalidate();
     }
 
     public boolean isInTouchMode()
