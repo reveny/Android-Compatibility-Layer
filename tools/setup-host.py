@@ -156,7 +156,7 @@ def phaseAosp():
     print("=== after ===")
     show_disk_usage()
     os.chdir(local_dir)
-    if p != 0:
+    if p.returncode != 0:
         print(f"sync incomplete (exit {p.returncode}) - just run this script again, it resumes.")
         exit(p.returncode)
 
