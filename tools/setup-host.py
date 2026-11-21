@@ -177,10 +177,6 @@ def phaseArt():
     WORK = f"{PROJ_DIR}/tmp"
     if " " in AOSP_DIR:
         print("error: AOSP_DIR contains whitespace; debugfs -R cannot be quoted safely")
-    os.environ['APEX'] = APEX
-    os.environ['HOST_LIB'] = HOST_LIB
-    os.environ['I18N_ROOT'] = I18N_ROOT
-    os.environ['WORK'] = WORK
     for tool in ["debugfs", "strings", "python3", "od"]:
         if not which(tool):
             print(f"error: {tool} not found")
@@ -191,6 +187,7 @@ def phaseArt():
     if not os.path.isfile(HOST_LIB):
         print(f"error: {HOST_LIB} not found - run tools/build-art-host.sh first")
         exit(1)
+    os.makedirs(WORK, exist_ok=True)
     with zipfile.ZipFile(APEX) as zf, open(f"{WORK}/payload.img", "wb") as f:
         f.write(zf.read("apex_payload.img"))
     dat = subprocess.run(
@@ -242,6 +239,7 @@ def phaseArt():
             print(f"error: {dest} is not ICU common data (missing CmnD magic)")
             exit(1)
     print(f"ANDROID_I18N_ROOT={I18N_ROOT}")
+    shutil.rmtree(WORK)
 
 
 @say("sdk")
