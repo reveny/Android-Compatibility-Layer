@@ -166,6 +166,7 @@ def phaseArt():
         print(f"no aosp checkout at {AOSP_DIR} - run the aosp phase first")
         exit(1)
     os.environ['AOSP_DIR'] = AOSP_DIR
+    os.environ['PATH'] = os.environ['PATH'] + ":"+ "/usr/sbin/"
     p = subprocess.run([f"{PROJ_DIR}/tools/build-art-host.sh"])
     if p.returncode != 0:
         exit(p.returncode)
