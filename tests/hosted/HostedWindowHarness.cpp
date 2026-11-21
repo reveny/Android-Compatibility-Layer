@@ -16,7 +16,8 @@ static constexpr int STOP_TIMEOUT_SECONDS = 20;
 
 struct SharedBuffer
 {
-    int fileDescriptor = ControlChannel::INVALID_FILE_DESCRIPTOR;
+    uint32_t generation = 0;
+    uint32_t index = 0;
     uint8_t* pixels = nullptr;
     size_t sizeBytes = 0;
 };
@@ -28,34 +29,49 @@ static uint64_t MonotonicNanos()
     return (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
 }
 
-static bool AllocateBuffers(SharedBuffer* buffers, uint32_t count, uint32_t stride, uint32_t height)
+static void AdoptBuffer(std::vector<SharedBuffer>& buffers, const ControlChannel::RegisterBufferPayload& payload, int descriptor)
 {
-    size_t sizeBytes = (size_t)stride * height;
+    if (payload.kind != ControlChannel::BufferKind::Shared || payload.planeCount != 1) return;
 
-    for (uint32_t index = 0; index < count; ++index)
+    size_t sizeBytes = (size_t)payload.strides[0] * payload.height;
+    void* mapped = mmap(nullptr, sizeBytes, PROT_READ, MAP_SHARED, descriptor, 0);
+    if (mapped == MAP_FAILED) return;
+
+    SharedBuffer buffer{};
+    buffer.generation = payload.generation;
+    buffer.index = payload.index;
+    buffer.pixels = (uint8_t*)mapped;
+    buffer.sizeBytes = sizeBytes;
+    buffers.push_back(buffer);
+}
+
+static void ForgetGeneration(std::vector<SharedBuffer>& buffers, uint32_t generation)
+{
+    for (size_t position = buffers.size(); position > 0; --position)
     {
-        int descriptor = memfd_create("acl-hosted-frame", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-        if (descriptor < 0) return false;
+        if (buffers[position - 1].generation != generation) continue;
 
-        if (ftruncate(descriptor, (off_t)sizeBytes) != 0)
-        {
-            close(descriptor);
-            return false;
-        }
+        munmap(buffers[position - 1].pixels, buffers[position - 1].sizeBytes);
+        buffers.erase(buffers.begin() + (long)(position - 1));
+    }
+}
 
-        void* mapped = mmap(nullptr, sizeBytes, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
-        if (mapped == MAP_FAILED)
-        {
-            close(descriptor);
-            return false;
-        }
-
-        buffers[index].fileDescriptor = descriptor;
-        buffers[index].pixels = (uint8_t*)mapped;
-        buffers[index].sizeBytes = sizeBytes;
+static const SharedBuffer* FindBuffer(const std::vector<SharedBuffer>& buffers, uint32_t generation, uint32_t index)
+{
+    for (const SharedBuffer& buffer : buffers)
+    {
+        if (buffer.generation == generation && buffer.index == index) return &buffer;
     }
 
-    return true;
+    return nullptr;
+}
+
+static void SendPresentDone(ControlChannel::Endpoint& shell)
+{
+    ControlChannel::Message present{};
+    ControlChannel::Prepare(present, ControlChannel::MessageKind::PresentDone);
+    present.payload.presentDone.frameTimeNanos = MonotonicNanos();
+    ControlChannel::Send(shell, present);
 }
 
 static bool WriteRaw(const char* path, const uint8_t* pixels, size_t sizeBytes)
@@ -82,7 +98,6 @@ int main(int argc, char** argv)
     const char* outputPath = argv[3];
     uint32_t width = (uint32_t)strtoul(argv[4], nullptr, 10);
     uint32_t height = (uint32_t)strtoul(argv[5], nullptr, 10);
-    uint32_t stride = width * 4;
     uint32_t stopAfterFrames = argc > 6 ? (uint32_t)strtoul(argv[6], nullptr, 10) : 0;
 
     ControlChannel::Endpoint shell{};
@@ -129,8 +144,7 @@ int main(int argc, char** argv)
 
     close(playerDescriptor);
 
-    SharedBuffer buffers[ControlChannel::FRAME_BUFFER_COUNT];
-    bool buffersReady = false;
+    std::vector<SharedBuffer> buffers;
     bool helloSeen = false;
     bool guestPresents = false;
     uint32_t framesReceived = 0;
@@ -148,7 +162,16 @@ int main(int argc, char** argv)
         }
 
         ControlChannel::Message message{};
-        ControlChannel::Result received = ControlChannel::Receive(shell, message, POLL_SLICE_MILLIS);
+        int descriptors[ControlChannel::MAX_DESCRIPTORS];
+        uint32_t descriptorCount = ControlChannel::MAX_DESCRIPTORS;
+        ControlChannel::Result received = ControlChannel::ReceiveWithDescriptors(shell, message, descriptors, descriptorCount, POLL_SLICE_MILLIS);
+
+        if (received == ControlChannel::Result::Ok && message.kind == ControlChannel::MessageKind::RegisterBuffer && descriptorCount > 0)
+        {
+            AdoptBuffer(buffers, message.payload.registerBuffer, descriptors[0]);
+        }
+
+        for (uint32_t index = 0; index < descriptorCount; ++index) close(descriptors[index]);
 
         if (received == ControlChannel::Result::PeerClosed) break;
 
@@ -168,8 +191,8 @@ int main(int argc, char** argv)
         if (message.kind == ControlChannel::MessageKind::Hello)
         {
             helloSeen = true;
-            printf("harness: hello from %s, version %u, %ux%u\n", message.payload.hello.packageName, message.payload.hello.version,
-                   message.payload.hello.width, message.payload.hello.height);
+            printf("harness: hello from %s titled %s, version %u, %ux%u\n", message.payload.hello.packageName, message.payload.hello.title,
+                   message.payload.hello.version, message.payload.hello.width, message.payload.hello.height);
 
             if (message.payload.hello.version != ControlChannel::PROTOCOL_VERSION)
             {
@@ -177,44 +200,43 @@ int main(int argc, char** argv)
                 break;
             }
 
-            if (!AllocateBuffers(buffers, ControlChannel::FRAME_BUFFER_COUNT, stride, height))
-            {
-                fprintf(stderr, "harness: cannot allocate shared frame buffers\n");
-                break;
-            }
+            ControlChannel::Message display{};
+            ControlChannel::Prepare(display, ControlChannel::MessageKind::Display);
+            display.payload.display.width = width;
+            display.payload.display.height = height;
+            display.payload.display.refreshMilliHertz = 60000;
+            display.payload.display.scale = 1;
+            ControlChannel::Send(shell, display);
+            continue;
+        }
 
-            int descriptors[ControlChannel::FRAME_BUFFER_COUNT];
-            for (uint32_t index = 0; index < ControlChannel::FRAME_BUFFER_COUNT; ++index) descriptors[index] = buffers[index].fileDescriptor;
+        if (message.kind == ControlChannel::MessageKind::ForgetBuffers)
+        {
+            ForgetGeneration(buffers, message.payload.forgetBuffers.generation);
+            continue;
+        }
 
-            ControlChannel::Message offer{};
-            ControlChannel::Prepare(offer, ControlChannel::MessageKind::Buffers);
-            offer.payload.buffers.count = ControlChannel::FRAME_BUFFER_COUNT;
-            offer.payload.buffers.width = width;
-            offer.payload.buffers.height = height;
-            offer.payload.buffers.stride = stride;
-
-            ControlChannel::SendWithDescriptors(shell, offer, descriptors, ControlChannel::FRAME_BUFFER_COUNT);
-            buffersReady = true;
+        if (message.kind == ControlChannel::MessageKind::RequestFrame)
+        {
+            SendPresentDone(shell);
             continue;
         }
 
         if (message.kind == ControlChannel::MessageKind::FrameReady)
         {
-            uint32_t index = message.payload.frameReady.index;
-            if (!buffersReady || index >= ControlChannel::FRAME_BUFFER_COUNT) continue;
+            const SharedBuffer* buffer = FindBuffer(buffers, message.payload.frameReady.generation, message.payload.frameReady.index);
+            if (!buffer) continue;
 
             framesReceived += 1;
-            WriteRaw(outputPath, buffers[index].pixels, buffers[index].sizeBytes);
+            WriteRaw(outputPath, buffer->pixels, buffer->sizeBytes);
 
             ControlChannel::Message release{};
             ControlChannel::Prepare(release, ControlChannel::MessageKind::BufferReleased);
-            release.payload.bufferReleased.index = index;
+            release.payload.bufferReleased.generation = buffer->generation;
+            release.payload.bufferReleased.index = buffer->index;
             ControlChannel::Send(shell, release);
 
-            ControlChannel::Message present{};
-            ControlChannel::Prepare(present, ControlChannel::MessageKind::PresentDone);
-            present.payload.presentDone.frameTimeNanos = MonotonicNanos();
-            ControlChannel::Send(shell, present);
+            SendPresentDone(shell);
 
             if (framesReceived == 1 && tapsSent == 0)
             {
@@ -295,11 +317,7 @@ int main(int argc, char** argv)
         if (child > 0) exitStatus = WIFEXITED(state) ? WEXITSTATUS(state) : 128 + WTERMSIG(state);
     }
 
-    for (uint32_t index = 0; index < ControlChannel::FRAME_BUFFER_COUNT; ++index)
-    {
-        if (buffers[index].pixels) munmap(buffers[index].pixels, buffers[index].sizeBytes);
-        if (buffers[index].fileDescriptor >= 0) close(buffers[index].fileDescriptor);
-    }
+    for (const SharedBuffer& buffer : buffers) munmap(buffer.pixels, buffer.sizeBytes);
 
     printf("harness: hello=%d frames=%u taps=%u progress=%u guestPresents=%d exit=%d\n", helloSeen ? 1 : 0, framesReceived, tapsSent,
            progressSeen, guestPresents ? 1 : 0, exitStatus);

@@ -58,6 +58,7 @@ static void CheckPairAndRoundTrip()
     sent.payload.hello.width = 1080;
     sent.payload.hello.height = 2400;
     ControlChannel::CopyText(sent.payload.hello.packageName, ControlChannel::MAX_NAME_BYTES, "com.example.graphics");
+    ControlChannel::CopyText(sent.payload.hello.title, ControlChannel::MAX_NAME_BYTES, "Graphics");
 
     Check(ControlChannel::Send(player, sent) == ControlChannel::Result::Ok, "the player sends hello");
 
@@ -66,6 +67,7 @@ static void CheckPairAndRoundTrip()
     Check(received.kind == ControlChannel::MessageKind::Hello, "the kind survives");
     Check(received.payload.hello.width == 1080 && received.payload.hello.height == 2400, "the geometry survives");
     Check(strcmp(received.payload.hello.packageName, "com.example.graphics") == 0, "the package name survives");
+    Check(strcmp(received.payload.hello.title, "Graphics") == 0, "the title survives");
     Check(shell.messagesReceived == 1 && player.messagesSent == 1, "both ends count the message");
 
     ControlChannel::Close(shell);
@@ -85,11 +87,15 @@ static void CheckDescriptorPassing()
     Check(buffers[0] >= 0 && buffers[1] >= 0, "two shared buffers exist");
 
     ControlChannel::Message sent{};
-    ControlChannel::Prepare(sent, ControlChannel::MessageKind::Buffers);
-    sent.payload.buffers.count = 2;
-    sent.payload.buffers.width = 4;
-    sent.payload.buffers.height = 1;
-    sent.payload.buffers.stride = 16;
+    ControlChannel::Prepare(sent, ControlChannel::MessageKind::RegisterBuffer);
+    sent.payload.registerBuffer.generation = 1;
+    sent.payload.registerBuffer.kind = ControlChannel::BufferKind::Dmabuf;
+    sent.payload.registerBuffer.planeCount = 2;
+    sent.payload.registerBuffer.width = 4;
+    sent.payload.registerBuffer.height = 1;
+    sent.payload.registerBuffer.strides[0] = 16;
+    sent.payload.registerBuffer.strides[1] = 8;
+    sent.payload.registerBuffer.modifier = ControlChannel::MODIFIER_INVALID;
 
     Check(ControlChannel::SendWithDescriptors(shell, sent, buffers, 2) == ControlChannel::Result::Ok, "the shell sends two descriptors");
 
@@ -103,7 +109,8 @@ static void CheckDescriptorPassing()
     Check(ControlChannel::ReceiveWithDescriptors(player, received, carried, carriedCount, 1000) == ControlChannel::Result::Ok,
           "the player receives them");
     Check(carriedCount == 2, "both descriptors arrive");
-    Check(received.payload.buffers.stride == 16, "the payload arrives with them");
+    Check(received.payload.registerBuffer.strides[1] == 8, "the payload arrives with them");
+    Check(received.payload.registerBuffer.modifier == ControlChannel::MODIFIER_INVALID, "the modifier keeps all 64 bits");
 
     char text[8];
     memset(text, 0, sizeof(text));
@@ -127,8 +134,8 @@ static void CheckDescriptorOverflow()
     int buffers[3] = {MakeSealedBuffer("a"), MakeSealedBuffer("b"), MakeSealedBuffer("c")};
 
     ControlChannel::Message sent{};
-    ControlChannel::Prepare(sent, ControlChannel::MessageKind::Buffers);
-    sent.payload.buffers.count = 3;
+    ControlChannel::Prepare(sent, ControlChannel::MessageKind::RegisterBuffer);
+    sent.payload.registerBuffer.planeCount = 3;
     ControlChannel::SendWithDescriptors(shell, sent, buffers, 3);
 
     close(buffers[0]);

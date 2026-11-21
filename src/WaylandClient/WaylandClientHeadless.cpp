@@ -8,14 +8,43 @@ WaylandClient::Result WaylandClient::Connect(Connection&)
 void WaylandClient::Disconnect(Connection&)
 {
 }
-
 WaylandClient::Result WaylandClient::CreateSurface(Connection&, uint32_t, uint32_t, const char*, Surface&)
+{
+    return Result::NotConnected;
+}
+
+WaylandClient::Result WaylandClient::CreateHostedSurface(Connection&, uint32_t, uint32_t, const char*, Surface&)
 {
     return Result::NotConnected;
 }
 
 void WaylandClient::DestroySurface(Surface&)
 {
+}
+
+WaylandClient::Result WaylandClient::SetTitle(Surface&, const char*)
+{
+    return Result::NotConnected;
+}
+
+wl_buffer* WaylandClient::ImportSharedBuffer(Connection&, int, uint32_t, uint32_t, uint32_t, uint32_t, ReleaseCallback, void*)
+{
+    return nullptr;
+}
+
+wl_buffer* WaylandClient::ImportDmabuf(Connection&, const int*, const uint32_t*, const uint32_t*, uint32_t, uint32_t, uint32_t, uint32_t,
+                                       uint64_t, ReleaseCallback, void*)
+{
+    return nullptr;
+}
+
+void WaylandClient::DestroyExternalBuffer(wl_buffer*)
+{
+}
+
+WaylandClient::Result WaylandClient::PresentExternal(Connection&, Surface&, wl_buffer*, uint32_t, uint32_t, uint32_t, uint32_t)
+{
+    return Result::NotConnected;
 }
 
 WaylandClient::DisplayMode WaylandClient::CurrentDisplayMode(const Connection&)

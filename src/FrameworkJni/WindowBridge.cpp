@@ -30,12 +30,12 @@ static void HandleFrame(void* context, uint64_t frameTimeNanos)
 
 static int WatchedDescriptor(const WindowBridge::Session& session)
 {
-    if (session.isHosted) return session.hosted.channel.fileDescriptor;
+    if (session.isHosted) return session.hosted.signalFileDescriptor;
 
     return session.connection.fileDescriptor;
 }
 
-WindowBridge::Result WindowBridge::Open(uint32_t width, uint32_t height, const char* title, Session& session)
+WindowBridge::Result WindowBridge::Open(uint32_t width, uint32_t height, const char* title, const char* packageName, Session& session)
 {
     if (session.open) return Result::AlreadyOpen;
 
@@ -43,7 +43,7 @@ WindowBridge::Result WindowBridge::Open(uint32_t width, uint32_t height, const c
 
     if (session.isHosted)
     {
-        if (HostedWindow::Open(width, height, title, session.hosted) != HostedWindow::Result::Ok)
+        if (HostedWindow::Open(width, height, title, packageName, session.hosted) != HostedWindow::Result::Ok)
         {
             session.isHosted = false;
             return Result::SurfaceFailed;
@@ -82,11 +82,13 @@ WindowBridge::Result WindowBridge::Open(uint32_t width, uint32_t height, const c
     session.open = true;
 
 #if defined(RUNTIME_HAVE_VULKAN)
-    if (!session.isHosted) VulkanWsi::AttachSurfaceTarget(session.connection.display, session.surface.surface);
+    if (session.isHosted) VulkanWsi::AttachHostedTarget(&session.hosted, width, height);
+    else VulkanWsi::AttachSurfaceTarget(session.connection.display, session.surface.surface);
 #endif
 
 #if defined(RUNTIME_HAVE_GLES)
-    if (!session.isHosted) GlesWsi::AttachSurfaceTarget(session.connection.display, session.surface.surface, width, height);
+    if (session.isHosted) GlesWsi::AttachHostedTarget(&session.hosted, width, height);
+    else GlesWsi::AttachSurfaceTarget(session.connection.display, session.surface.surface, width, height);
 #endif
 
     return Result::Ok;
@@ -133,7 +135,10 @@ WindowBridge::Result WindowBridge::BeginFrame(Session& session)
     if (session.isHosted)
     {
         HostedWindow::Buffer* hostedBuffer = nullptr;
-        if (HostedWindow::AcquireBuffer(session.hosted, hostedBuffer) != HostedWindow::Result::Ok) return Result::NoFreeBuffer;
+        if (HostedWindow::AcquireBuffer(session.hosted, hostedBuffer, session.hostedIndex) != HostedWindow::Result::Ok)
+        {
+            return Result::NoFreeBuffer;
+        }
 
         session.hostedCurrent = hostedBuffer;
         Rasterizer::WrapSurface(hostedBuffer->pixels, session.hosted.width, session.hosted.height, session.hosted.stride, session.target);
@@ -184,8 +189,9 @@ WindowBridge::Result WindowBridge::EndFrame(Session& session)
 
         Overlay::DrawInto(session.hostedCurrent->pixels, session.hosted.width, session.hosted.height, session.hosted.stride);
         DumpFrame(session.hostedCurrent->pixels, session.hostedCurrent->sizeBytes);
-        HostedWindow::Present(session.hosted, session.hosted.lastFrameTimeNanos);
+        HostedWindow::Present(session.hosted, session.hostedIndex, session.lastFrameTimeNanos);
         session.hostedCurrent = nullptr;
+        session.hostedIndex = HostedWindow::INVALID_BUFFER_INDEX;
         return Result::Ok;
     }
 
@@ -202,14 +208,16 @@ WindowBridge::Result WindowBridge::RequestFrame(Session& session)
 {
     if (!session.open) return Result::NotOpen;
 
+    if (session.framePending) return Result::Ok;
+
     if (session.isHosted)
     {
-        HostedWindow::RequestFrame(session.hosted);
+        if (HostedWindow::RequestFrame(session.hosted) != HostedWindow::Result::Ok) return Result::PollFailed;
+
+        session.framePending = true;
         Wake(session);
         return Result::Ok;
     }
-
-    if (session.framePending) return Result::Ok;
 
     if (WaylandClient::RequestFrame(session.connection, session.surface, &HandleFrame, &session) != WaylandClient::Result::Ok)
     {
@@ -221,9 +229,43 @@ WindowBridge::Result WindowBridge::RequestFrame(Session& session)
     return Result::Ok;
 }
 
+static void ApplyPendingHostedResize(WindowBridge::Session& session)
+{
+    if (session.hostedCurrent != nullptr) return;
+
+    uint32_t width = 0;
+    uint32_t height = 0;
+
+    if (!HostedWindow::ConsumeConfigure(session.hosted, width, height)) return;
+    if (width == session.hosted.width && height == session.hosted.height) return;
+
+    HostedWindow::Result resized = HostedWindow::Resize(session.hosted, width, height);
+
+    if (resized != HostedWindow::Result::Ok)
+    {
+        fprintf(stderr, "[windowbridge] the window host asked for %ux%u and the buffers could not follow: %s\n", width, height,
+                HostedWindow::ResultName(resized));
+        return;
+    }
+
+    fprintf(stderr, "[windowbridge] the window is now %ux%u\n", width, height);
+
+    session.resizedWidth = width;
+    session.resizedHeight = height;
+    session.resizePending = true;
+
+#if defined(RUNTIME_HAVE_GLES)
+    GlesWsi::ResizeSurfaceTarget(width, height);
+#endif
+}
+
 static void ApplyPendingResize(WindowBridge::Session& session)
 {
-    if (session.isHosted) return;
+    if (session.isHosted)
+    {
+        ApplyPendingHostedResize(session);
+        return;
+    }
 
     WaylandClient::Surface& surface = session.surface;
 
@@ -281,10 +323,13 @@ WindowBridge::Result WindowBridge::Poll(Session& session, int timeoutMillis)
 
         if (session.isHosted)
         {
-            if (HostedWindow::Pump(session.hosted, 0) == HostedWindow::Result::PeerClosed)
+            HostedWindow::DrainSignal(session.hosted);
+
+            if (HostedWindow::ConsumeFrame(session.hosted))
             {
-                fprintf(stderr, "[windowbridge] the shell closed the control channel\n");
-                return Result::NoCompositor;
+                session.frameArrived = true;
+                session.framePending = false;
+                session.lastFrameTimeNanos = session.hosted.lastFrameTimeNanos;
             }
 
             continue;
@@ -339,32 +384,33 @@ bool WindowBridge::ConsumeResize(Session& session, uint32_t& width, uint32_t& he
 WindowBridge::Result WindowBridge::SetFullscreen(Session& session, bool fullscreen)
 {
     if (!session.open) return Result::NotOpen;
-    if (session.isHosted) return Result::Ok;
+
+    if (session.isHosted)
+    {
+        return HostedWindow::SetFullscreen(session.hosted, fullscreen) == HostedWindow::Result::Ok ? Result::Ok : Result::NoCompositor;
+    }
 
     return WaylandClient::SetFullscreen(session.surface, fullscreen) == WaylandClient::Result::Ok ? Result::Ok : Result::NoCompositor;
 }
 
 bool WindowBridge::ConsumeFrame(Session& session)
 {
-    if (session.isHosted)
-    {
-        if (!session.hosted.frameArrived) return false;
-
-        session.hosted.frameArrived = false;
-        return true;
-    }
-
     if (!session.frameArrived) return false;
 
     session.frameArrived = false;
     return true;
 }
 
-bool WindowBridge::IsCloseRequested(const Session& session)
+bool WindowBridge::IsCloseRequested(Session& session)
 {
-    if (session.isHosted) return session.hosted.stopRequested;
+    if (session.isHosted) return HostedWindow::IsStopRequested(session.hosted);
 
     return session.surface.closeRequested;
+}
+
+uint64_t WindowBridge::LastFrameTimeNanos(Session& session)
+{
+    return session.lastFrameTimeNanos;
 }
 
 const char* WindowBridge::ResultName(Result result)

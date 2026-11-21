@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 struct wl_buffer;
 struct wl_compositor;
@@ -11,6 +12,7 @@ struct wl_output;
 struct wl_shm;
 struct wl_shm_pool;
 struct wl_surface;
+struct wl_cursor_theme;
 struct wl_seat;
 struct wl_pointer;
 struct wl_keyboard;
@@ -21,6 +23,11 @@ struct xdg_wm_base;
 struct wp_presentation;
 struct zxdg_decoration_manager_v1;
 struct zxdg_toplevel_decoration_v1;
+struct zwp_linux_dmabuf_v1;
+struct wp_viewporter;
+struct wp_viewport;
+struct libdecor;
+struct libdecor_frame;
 
 namespace WaylandClient
 {
@@ -34,6 +41,14 @@ namespace WaylandClient
     inline constexpr uint32_t DEFAULT_WIDTH = 1080;
     inline constexpr uint32_t DEFAULT_HEIGHT = 2400;
     inline constexpr int CONNECT_TIMEOUT_MILLIS = 5000;
+    inline constexpr const char* FRAME_LIBRARY = "libdecor-0.so.0";
+    inline constexpr const char* DEFAULT_CURSOR = "default";
+    inline constexpr const char* FALLBACK_CURSOR = "left_ptr";
+    inline constexpr int DEFAULT_CURSOR_SIZE = 24;
+    inline constexpr int MAX_TRACKED_TOUCHES = 32;
+    inline constexpr uint32_t MAX_BUFFER_PLANES = 4;
+    inline constexpr uint32_t FOURCC_ARGB8888 = 0x34325241;
+    inline constexpr uint32_t FOURCC_XRGB8888 = 0x34325258;
 
     enum class Result : uint8_t
     {
@@ -80,7 +95,10 @@ namespace WaylandClient
         xdg_surface* shellSurface = nullptr;
         xdg_toplevel* toplevel = nullptr;
         zxdg_toplevel_decoration_v1* decoration = nullptr;
+        wp_viewport* viewport = nullptr;
+        libdecor_frame* frame = nullptr;
         bool decorated = false;
+        bool maximized = false;
         wl_shm_pool* pool = nullptr;
         int poolFileDescriptor = INVALID_FILE_DESCRIPTOR;
         uint8_t* poolBase = nullptr;
@@ -91,6 +109,8 @@ namespace WaylandClient
         uint32_t pendingHeight = 0;
         uint32_t boundsWidth = 0;
         uint32_t boundsHeight = 0;
+        uint32_t floatingWidth = 0;
+        uint32_t floatingHeight = 0;
         Buffer buffers[BUFFER_COUNT];
         RetiredPool retired[MAX_RETIRED_POOLS];
         bool configured = false;
@@ -121,6 +141,12 @@ namespace WaylandClient
         uint64_t timeNanos = 0;
     };
 
+    struct DmabufFormat
+    {
+        uint32_t format = 0;
+        uint64_t modifier = 0;
+    };
+
     struct Connection
     {
         wl_display* display = nullptr;
@@ -130,6 +156,18 @@ namespace WaylandClient
         xdg_wm_base* shell = nullptr;
         wp_presentation* presentation = nullptr;
         zxdg_decoration_manager_v1* decorations = nullptr;
+        zwp_linux_dmabuf_v1* dmabuf = nullptr;
+        wp_viewporter* viewporter = nullptr;
+        void* dmabufFeedback = nullptr;
+        std::vector<DmabufFormat> dmabufFormats;
+        uint64_t dmabufMainDevice = 0;
+        bool dmabufDescribed = false;
+        libdecor* frames = nullptr;
+        wl_surface* contentSurface = nullptr;
+        wl_surface* pointerSurface = nullptr;
+        wl_cursor_theme* cursorTheme = nullptr;
+        wl_surface* cursorSurface = nullptr;
+        uint32_t foreignTouches = 0;
         wl_seat* seat = nullptr;
         wl_pointer* pointer = nullptr;
         wl_keyboard* keyboard = nullptr;
@@ -169,12 +207,24 @@ namespace WaylandClient
     };
 
     using FrameCallback = void (*)(void* context, uint64_t frameTimeNanos);
+    using ReleaseCallback = void (*)(void* context);
 
     Result Connect(Connection& connection);
     void Disconnect(Connection& connection);
 
     Result CreateSurface(Connection& connection, uint32_t width, uint32_t height, const char* title, Surface& surface);
+    Result CreateHostedSurface(Connection& connection, uint32_t width, uint32_t height, const char* title, Surface& surface);
     void DestroySurface(Surface& surface);
+    Result SetTitle(Surface& surface, const char* title);
+
+    wl_buffer* ImportSharedBuffer(Connection& connection, int fileDescriptor, uint32_t width, uint32_t height, uint32_t stride,
+                                  uint32_t format, ReleaseCallback callback, void* context);
+    wl_buffer* ImportDmabuf(Connection& connection, const int* fileDescriptors, const uint32_t* offsets, const uint32_t* strides,
+                            uint32_t planeCount, uint32_t width, uint32_t height, uint32_t format, uint64_t modifier,
+                            ReleaseCallback callback, void* context);
+    void DestroyExternalBuffer(wl_buffer* buffer);
+    Result PresentExternal(Connection& connection, Surface& surface, wl_buffer* buffer, uint32_t width, uint32_t height, uint32_t shownWidth,
+                           uint32_t shownHeight);
 
     DisplayMode CurrentDisplayMode(const Connection& connection);
 
@@ -190,6 +240,8 @@ namespace WaylandClient
     inline constexpr const char* SOCKET_SETTING = "wayland-socket";
     inline constexpr const char* DECORATION_SETTING = "decorated";
     inline constexpr const char* FULLSCREEN_SETTING = "fullscreen";
+    inline constexpr const char* TITLE_SETTING = "window-title";
+    inline constexpr const char* FRAMES_SETTING = "window-frames";
 
     bool NextInputEvent(Connection& connection, InputEvent& event);
     void QueueInputEvent(Connection& connection, const InputEvent& event);

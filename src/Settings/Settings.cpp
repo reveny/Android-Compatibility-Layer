@@ -1,6 +1,7 @@
 #include "Settings/Settings.hpp"
 
 #include <cstring>
+#include <memory>
 #include <pwd.h>
 #include <unistd.h>
 #include <vector>
@@ -11,9 +12,9 @@ struct Entry
     std::string value;
 };
 
-static std::vector<Entry>& Store()
+static std::vector<std::unique_ptr<Entry>>& Store()
 {
-    static std::vector<Entry> store;
+    static std::vector<std::unique_ptr<Entry>> store;
     return store;
 }
 
@@ -21,9 +22,9 @@ static Entry* Find(const char* name)
 {
     if (!name || !*name) return nullptr;
 
-    for (Entry& entry : Store())
+    for (const std::unique_ptr<Entry>& entry : Store())
     {
-        if (entry.name == name) return &entry;
+        if (entry->name == name) return entry.get();
     }
 
     return nullptr;
@@ -54,18 +55,18 @@ void Settings::Set(const std::string& name, const std::string& value)
         return;
     }
 
-    Store().push_back(Entry{name, value});
+    Store().push_back(std::make_unique<Entry>(Entry{name, value}));
 }
 
 void Settings::Unset(const char* name)
 {
     if (!name || !*name) return;
 
-    std::vector<Entry>& store = Store();
+    std::vector<std::unique_ptr<Entry>>& store = Store();
 
     for (size_t index = 0; index < store.size(); ++index)
     {
-        if (store[index].name != name) continue;
+        if (store[index]->name != name) continue;
 
         store.erase(store.begin() + (long)index);
         return;
@@ -86,8 +87,8 @@ bool Settings::At(size_t index, std::string& name, std::string& value)
 {
     if (index >= Store().size()) return false;
 
-    name = Store()[index].name;
-    value = Store()[index].value;
+    name = Store()[index]->name;
+    value = Store()[index]->value;
 
     return true;
 }

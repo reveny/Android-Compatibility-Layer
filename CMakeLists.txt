@@ -141,6 +141,14 @@ message(STATUS "freetype ${FREETYPE_VERSION}, harfbuzz ${HARFBUZZ_VERSION}, font
 if(RUNTIME_ENABLE_GRAPHICS)
     pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
     pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
+    pkg_check_modules(WAYLAND_CURSOR REQUIRED IMPORTED_TARGET wayland-cursor)
+    pkg_check_modules(LIBDECOR libdecor-0)
+
+    if(LIBDECOR_FOUND)
+        message(STATUS "libdecor ${LIBDECOR_VERSION} headers, loaded at run time for the window frame")
+    else()
+        message(STATUS "libdecor headers not found, so windows get a frame only from compositors that draw one")
+    endif()
 
     pkg_get_variable(RUNTIME_WAYLAND_SCANNER wayland-scanner wayland_scanner)
     if(NOT RUNTIME_WAYLAND_SCANNER)
