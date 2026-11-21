@@ -196,7 +196,7 @@ def phaseArt():
         text=True,
         check=True,
     )
-    dat = [i for i in dat.stdout.split('\n') if i.strip().startswith('icudt') and i.strip().endswith(".dat")]
+    dat = [i.strip().split(" ")[-1] for i in dat.stdout.split('\n') if i.strip().endswith(".dat")]
     if not dat:
         print(f"error: no icudt*.dat inside {APEX}")
         exit(1)
