@@ -1501,6 +1501,11 @@ static bool SignalBelongsToTheRuntime(int number)
            number == SIGSYS;
 }
 
+static bool SignalBelongsToTheSession(int number)
+{
+    return number == SIGINT || number == SIGTERM || number == SIGHUP;
+}
+
 static void DeliverGuestSignal(int number, siginfo_t* information, void* context)
 {
     (void)context;
@@ -1618,6 +1623,12 @@ static AbiBridge::Result InstallSignalActionHandler(void* context, GuestState::R
         return AbiBridge::Result::Ok;
     }
 
+    if (SignalBelongsToTheSession(number))
+    {
+        registers.general[0] = 0;
+        return AbiBridge::Result::Ok;
+    }
+
     if (handler != GUEST_SIGNAL_DEFAULT && handler != GUEST_SIGNAL_IGNORE && !InstallHostSignalHandler(number))
     {
         errno = EINVAL;
@@ -1646,7 +1657,8 @@ static AbiBridge::Result InstallSignalHandlerHandler(void* context, GuestState::
 
     uint64_t established = gGuestSignalHandlers[number].exchange(handler, std::memory_order_acq_rel);
 
-    if (!SignalBelongsToTheRuntime(number) && handler != GUEST_SIGNAL_DEFAULT && handler != GUEST_SIGNAL_IGNORE)
+    if (!SignalBelongsToTheRuntime(number) && !SignalBelongsToTheSession(number) && handler != GUEST_SIGNAL_DEFAULT &&
+        handler != GUEST_SIGNAL_IGNORE)
         InstallHostSignalHandler(number);
 
     registers.general[0] = established;

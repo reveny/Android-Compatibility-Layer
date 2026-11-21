@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "FrameworkJni/HostedWindow.hpp"
+#include "HostedWindow/HostedWindow.hpp"
 #include "Rasterizer/Rasterizer.hpp"
 #include "WaylandClient/WaylandClient.hpp"
 
@@ -31,6 +31,7 @@ namespace WindowBridge
         WaylandClient::Buffer* current = nullptr;
         HostedWindow::Session hosted;
         HostedWindow::Buffer* hostedCurrent = nullptr;
+        uint32_t hostedIndex = HostedWindow::INVALID_BUFFER_INDEX;
         Rasterizer::Surface target;
         Rasterizer::Canvas canvas;
         int epollFileDescriptor = INVALID_FILE_DESCRIPTOR;
@@ -46,7 +47,7 @@ namespace WindowBridge
         bool transparent = false;
     };
 
-    Result Open(uint32_t width, uint32_t height, const char* title, Session& session);
+    Result Open(uint32_t width, uint32_t height, const char* title, const char* packageName, Session& session);
     void Close(Session& session);
 
     Result BeginFrame(Session& session);
@@ -60,7 +61,8 @@ namespace WindowBridge
     bool ConsumeResize(Session& session, uint32_t& width, uint32_t& height);
     Result SetFullscreen(Session& session, bool fullscreen);
     bool NextInputEvent(Session& session, WaylandClient::InputEvent& event);
-    bool IsCloseRequested(const Session& session);
+    bool IsCloseRequested(Session& session);
+    uint64_t LastFrameTimeNanos(Session& session);
 
     const char* ResultName(Result result);
 }

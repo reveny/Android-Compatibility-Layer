@@ -28,7 +28,14 @@ static void SanitiseMessage(ControlChannel::Message& message)
 {
     if (message.kind == ControlChannel::MessageKind::Hello)
     {
+        TerminateText(message.payload.hello.title, ControlChannel::MAX_NAME_BYTES);
         TerminateText(message.payload.hello.packageName, ControlChannel::MAX_NAME_BYTES);
+        return;
+    }
+
+    if (message.kind == ControlChannel::MessageKind::SetTitle)
+    {
+        TerminateText(message.payload.title.title, ControlChannel::MAX_NAME_BYTES);
         return;
     }
 
@@ -359,12 +366,18 @@ const char* ControlChannel::MessageKindName(MessageKind kind)
     {
         case MessageKind::Invalid: return "Invalid";
         case MessageKind::Hello: return "Hello";
-        case MessageKind::Buffers: return "Buffers";
+        case MessageKind::Display: return "Display";
+        case MessageKind::Configure: return "Configure";
+        case MessageKind::RegisterBuffer: return "RegisterBuffer";
+        case MessageKind::ForgetBuffers: return "ForgetBuffers";
         case MessageKind::FrameReady: return "FrameReady";
         case MessageKind::BufferReleased: return "BufferReleased";
+        case MessageKind::RequestFrame: return "RequestFrame";
         case MessageKind::PresentDone: return "PresentDone";
         case MessageKind::Input: return "Input";
         case MessageKind::Stop: return "Stop";
+        case MessageKind::SetTitle: return "SetTitle";
+        case MessageKind::SetFullscreen: return "SetFullscreen";
         case MessageKind::Progress: return "Progress";
         case MessageKind::Statistics: return "Statistics";
         case MessageKind::Log: return "Log";

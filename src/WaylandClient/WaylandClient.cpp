@@ -11,14 +11,22 @@
 
 #include <cstdlib>
 #include <ctime>
+#include <dlfcn.h>
 #include <thread>
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
+#include "linux-dmabuf-v1-client-protocol.h"
 #include "presentation-time-client-protocol.h"
+#include "viewporter-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
+
+#if defined(RUNTIME_HAVE_LIBDECOR)
+#include <libdecor.h>
+#endif
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -111,9 +119,22 @@ static void QueueTouch(WaylandClient::Connection* connection, int32_t action, in
     WaylandClient::QueueInputEvent(*connection, event);
 }
 
-static void HandlePointerEnter(void* data, wl_pointer*, uint32_t, wl_surface*, wl_fixed_t x, wl_fixed_t y)
+static bool PointerOffContent(const WaylandClient::Connection* connection)
+{
+    return connection->pointerSurface == nullptr || connection->pointerSurface != connection->contentSurface;
+}
+
+static void ShowDefaultCursor(WaylandClient::Connection* connection, wl_pointer* pointer, uint32_t serial);
+
+static void HandlePointerEnter(void* data, wl_pointer* pointer, uint32_t serial, wl_surface* entered, wl_fixed_t x, wl_fixed_t y)
 {
     WaylandClient::Connection* connection = (WaylandClient::Connection*)data;
+    connection->pointerSurface = entered;
+
+    if (PointerOffContent(connection)) return;
+
+    ShowDefaultCursor(connection, pointer, serial);
+
     connection->pointerX = (float)wl_fixed_to_double(x);
     connection->pointerY = (float)wl_fixed_to_double(y);
 
@@ -123,6 +144,11 @@ static void HandlePointerEnter(void* data, wl_pointer*, uint32_t, wl_surface*, w
 static void HandlePointerLeave(void* data, wl_pointer*, uint32_t, wl_surface*)
 {
     WaylandClient::Connection* connection = (WaylandClient::Connection*)data;
+
+    const bool leftContent = !PointerOffContent(connection);
+    connection->pointerSurface = nullptr;
+
+    if (!leftContent) return;
 
     if (connection->pointerDown)
     {
@@ -134,6 +160,9 @@ static void HandlePointerLeave(void* data, wl_pointer*, uint32_t, wl_surface*)
 static void HandlePointerMotion(void* data, wl_pointer*, uint32_t, wl_fixed_t x, wl_fixed_t y)
 {
     WaylandClient::Connection* connection = (WaylandClient::Connection*)data;
+
+    if (PointerOffContent(connection)) return;
+
     connection->pointerX = (float)wl_fixed_to_double(x);
     connection->pointerY = (float)wl_fixed_to_double(y);
 
@@ -147,6 +176,8 @@ static void HandlePointerButton(void* data, wl_pointer*, uint32_t, uint32_t, uin
     WaylandClient::Connection* connection = (WaylandClient::Connection*)data;
 
     if (InputTracingRequested()) fprintf(stderr, "[waylandclient] pointer button %u state %u\n", button, state);
+
+    if (PointerOffContent(connection)) return;
 
     if (button != POINTER_BUTTON_LEFT) return;
 
@@ -196,9 +227,23 @@ static const wl_pointer_listener POINTER_LISTENER = {
     HandlePointerWarp,
 };
 
-static void HandleTouchDown(void* data, wl_touch*, uint32_t, uint32_t, wl_surface*, int32_t id, wl_fixed_t x, wl_fixed_t y)
+static bool TouchIsForeign(const WaylandClient::Connection* connection, int32_t id)
+{
+    return id >= 0 && id < WaylandClient::MAX_TRACKED_TOUCHES && (connection->foreignTouches & (1u << id)) != 0;
+}
+
+static void HandleTouchDown(void* data, wl_touch*, uint32_t, uint32_t, wl_surface* touched, int32_t id, wl_fixed_t x, wl_fixed_t y)
 {
     WaylandClient::Connection* connection = (WaylandClient::Connection*)data;
+
+    if (id >= 0 && id < WaylandClient::MAX_TRACKED_TOUCHES)
+    {
+        if (touched != connection->contentSurface) connection->foreignTouches |= 1u << id;
+        else connection->foreignTouches &= ~(1u << id);
+    }
+
+    if (TouchIsForeign(connection, id)) return;
+
     QueueTouch(connection, id == 0 ? TOUCH_ACTION_DOWN : TOUCH_ACTION_POINTER_DOWN, id, (float)wl_fixed_to_double(x),
                (float)wl_fixed_to_double(y));
 }
@@ -206,12 +251,21 @@ static void HandleTouchDown(void* data, wl_touch*, uint32_t, uint32_t, wl_surfac
 static void HandleTouchUp(void* data, wl_touch*, uint32_t, uint32_t, int32_t id)
 {
     WaylandClient::Connection* connection = (WaylandClient::Connection*)data;
+
+    if (TouchIsForeign(connection, id))
+    {
+        connection->foreignTouches &= ~(1u << id);
+        return;
+    }
+
     QueueTouch(connection, id == 0 ? TOUCH_ACTION_UP : TOUCH_ACTION_POINTER_UP, id, connection->pointerX, connection->pointerY);
 }
 
 static void HandleTouchMotion(void* data, wl_touch*, uint32_t, int32_t id, wl_fixed_t x, wl_fixed_t y)
 {
     WaylandClient::Connection* connection = (WaylandClient::Connection*)data;
+    if (TouchIsForeign(connection, id)) return;
+
     QueueTouch(connection, TOUCH_ACTION_MOVE, id, (float)wl_fixed_to_double(x), (float)wl_fixed_to_double(y));
 }
 
@@ -429,10 +483,16 @@ static bool DecorationRequested()
 {
     static const bool requested = []() {
         const char* setting = Settings::Lookup(WaylandClient::DECORATION_SETTING);
-        return setting != nullptr && strcmp(setting, "0") != 0;
+        return setting == nullptr || strcmp(setting, "0") != 0;
     }();
 
     return requested;
+}
+
+static bool FramesWanted()
+{
+    const char* setting = Settings::Lookup(WaylandClient::FRAMES_SETTING);
+    return setting == nullptr || strcmp(setting, "0") != 0;
 }
 
 static void HandleDecorationConfigure(void* data, zxdg_toplevel_decoration_v1*, uint32_t mode)
@@ -490,9 +550,172 @@ static void HandleOutputDescription(void*, wl_output*, const char*)
 static const wl_output_listener OUTPUT_LISTENER = {HandleOutputGeometry, HandleOutputMode,        HandleOutputDone,
                                                    HandleOutputScale,    HandleOutputName, HandleOutputDescription};
 
+struct DmabufFeedback
+{
+    WaylandClient::Connection* connection = nullptr;
+    zwp_linux_dmabuf_feedback_v1* feedback = nullptr;
+    void* table = nullptr;
+    size_t tableBytes = 0;
+    uint64_t mainDevice = 0;
+    std::vector<WaylandClient::DmabufFormat> pending;
+};
+
+static void HandleFeedbackDone(void* data, zwp_linux_dmabuf_feedback_v1*)
+{
+    DmabufFeedback* state = static_cast<DmabufFeedback*>(data);
+
+    state->connection->dmabufFormats = state->pending;
+    state->connection->dmabufMainDevice = state->mainDevice;
+    state->connection->dmabufDescribed = true;
+    state->pending.clear();
+}
+
+static void HandleFeedbackFormatTable(void* data, zwp_linux_dmabuf_feedback_v1*, int32_t descriptor, uint32_t size)
+{
+    DmabufFeedback* state = static_cast<DmabufFeedback*>(data);
+
+    if (state->table) munmap(state->table, state->tableBytes);
+    state->table = nullptr;
+    state->tableBytes = 0;
+
+    void* mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, descriptor, 0);
+    close(descriptor);
+
+    if (mapped == MAP_FAILED) return;
+
+    state->table = mapped;
+    state->tableBytes = size;
+}
+
+static void HandleFeedbackMainDevice(void* data, zwp_linux_dmabuf_feedback_v1*, wl_array* device)
+{
+    DmabufFeedback* state = static_cast<DmabufFeedback*>(data);
+
+    if (!device || device->size != sizeof(dev_t)) return;
+
+    dev_t value = 0;
+    memcpy(&value, device->data, sizeof(dev_t));
+    state->mainDevice = (uint64_t)value;
+}
+
+static void HandleFeedbackTrancheDone(void*, zwp_linux_dmabuf_feedback_v1*)
+{
+}
+
+static void HandleFeedbackTrancheTargetDevice(void*, zwp_linux_dmabuf_feedback_v1*, wl_array*)
+{
+}
+
+static void HandleFeedbackTrancheFormats(void* data, zwp_linux_dmabuf_feedback_v1*, wl_array* indices)
+{
+    DmabufFeedback* state = static_cast<DmabufFeedback*>(data);
+
+    if (!indices || !state->table) return;
+
+    struct TableEntry
+    {
+        uint32_t format;
+        uint32_t padding;
+        uint64_t modifier;
+    };
+
+    const TableEntry* entries = static_cast<const TableEntry*>(state->table);
+    size_t entryCount = state->tableBytes / sizeof(TableEntry);
+    const uint16_t* cursor = static_cast<const uint16_t*>(indices->data);
+    size_t count = indices->size / sizeof(uint16_t);
+
+    for (size_t position = 0; position < count; ++position)
+    {
+        if (cursor[position] >= entryCount) continue;
+
+        WaylandClient::DmabufFormat format{};
+        format.format = entries[cursor[position]].format;
+        format.modifier = entries[cursor[position]].modifier;
+        state->pending.push_back(format);
+    }
+}
+
+static void HandleFeedbackTrancheFlags(void*, zwp_linux_dmabuf_feedback_v1*, uint32_t)
+{
+}
+
+static const zwp_linux_dmabuf_feedback_v1_listener FEEDBACK_LISTENER = {HandleFeedbackDone,
+                                                                        HandleFeedbackFormatTable,
+                                                                        HandleFeedbackMainDevice,
+                                                                        HandleFeedbackTrancheDone,
+                                                                        HandleFeedbackTrancheTargetDevice,
+                                                                        HandleFeedbackTrancheFormats,
+                                                                        HandleFeedbackTrancheFlags};
+
+static void HandleDmabufFormat(void*, zwp_linux_dmabuf_v1*, uint32_t)
+{
+}
+
+static void HandleDmabufModifier(void* data, zwp_linux_dmabuf_v1*, uint32_t format, uint32_t modifierHigh, uint32_t modifierLow)
+{
+    WaylandClient::Connection* connection = static_cast<WaylandClient::Connection*>(data);
+
+    WaylandClient::DmabufFormat entry{};
+    entry.format = format;
+    entry.modifier = ((uint64_t)modifierHigh << 32) | modifierLow;
+    connection->dmabufFormats.push_back(entry);
+    connection->dmabufDescribed = true;
+}
+
+static const zwp_linux_dmabuf_v1_listener DMABUF_LISTENER = {HandleDmabufFormat, HandleDmabufModifier};
+
+static void BindDmabuf(WaylandClient::Connection* connection, wl_registry* registry, uint32_t name, uint32_t version)
+{
+    if (version < 3) return;
+
+    uint32_t bound = version < 4 ? version : 4;
+    connection->dmabuf = static_cast<zwp_linux_dmabuf_v1*>(wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, bound));
+
+    if (bound < 4)
+    {
+        zwp_linux_dmabuf_v1_add_listener(connection->dmabuf, &DMABUF_LISTENER, connection);
+        return;
+    }
+
+    DmabufFeedback* state = new DmabufFeedback;
+    state->connection = connection;
+    state->feedback = zwp_linux_dmabuf_v1_get_default_feedback(connection->dmabuf);
+    zwp_linux_dmabuf_feedback_v1_add_listener(state->feedback, &FEEDBACK_LISTENER, state);
+    connection->dmabufFeedback = state;
+}
+
+static void ReleaseDmabuf(WaylandClient::Connection& connection)
+{
+    DmabufFeedback* state = static_cast<DmabufFeedback*>(connection.dmabufFeedback);
+
+    if (state)
+    {
+        if (state->feedback) zwp_linux_dmabuf_feedback_v1_destroy(state->feedback);
+        if (state->table) munmap(state->table, state->tableBytes);
+        delete state;
+    }
+
+    if (connection.dmabuf) zwp_linux_dmabuf_v1_destroy(connection.dmabuf);
+
+    connection.dmabufFeedback = nullptr;
+    connection.dmabuf = nullptr;
+}
+
 static void HandleRegistryGlobal(void* data, wl_registry* registry, uint32_t name, const char* interface, uint32_t version)
 {
     WaylandClient::Connection* connection = static_cast<WaylandClient::Connection*>(data);
+
+    if (strcmp(interface, zwp_linux_dmabuf_v1_interface.name) == 0)
+    {
+        if (connection->dmabuf == nullptr) BindDmabuf(connection, registry, name, version);
+        return;
+    }
+
+    if (strcmp(interface, wp_viewporter_interface.name) == 0)
+    {
+        connection->viewporter = static_cast<wp_viewporter*>(wl_registry_bind(registry, name, &wp_viewporter_interface, 1));
+        return;
+    }
 
     if (strcmp(interface, wl_output_interface.name) == 0)
     {
@@ -561,6 +784,34 @@ static void HandleBufferRelease(void* data, wl_buffer*)
 
 static const wl_buffer_listener BUFFER_LISTENER = {HandleBufferRelease};
 
+static void ApplyWindowState(WaylandClient::Surface& surface, bool fullscreen, bool maximized, int32_t width, int32_t height)
+{
+    const bool wasFloating = !surface.fullscreen && !surface.maximized;
+    const bool floating = !fullscreen && !maximized;
+
+    if (wasFloating && !floating && surface.width > 0)
+    {
+        surface.floatingWidth = surface.width;
+        surface.floatingHeight = surface.height;
+    }
+
+    surface.fullscreen = fullscreen;
+    surface.maximized = maximized;
+
+    if (width > 0 && height > 0)
+    {
+        surface.pendingWidth = static_cast<uint32_t>(width);
+        surface.pendingHeight = static_cast<uint32_t>(height);
+        return;
+    }
+
+    if (floating && !wasFloating && surface.floatingWidth > 0)
+    {
+        surface.pendingWidth = surface.floatingWidth;
+        surface.pendingHeight = surface.floatingHeight;
+    }
+}
+
 static void HandleShellSurfaceConfigure(void* data, xdg_surface* shellSurface, uint32_t serial)
 {
     WaylandClient::Surface* surface = static_cast<WaylandClient::Surface*>(data);
@@ -574,7 +825,8 @@ static void HandleToplevelConfigure(void* data, xdg_toplevel*, int32_t width, in
 {
     WaylandClient::Surface* surface = static_cast<WaylandClient::Surface*>(data);
 
-    surface->fullscreen = false;
+    bool fullscreen = false;
+    bool maximized = false;
 
     if (states)
     {
@@ -583,14 +835,12 @@ static void HandleToplevelConfigure(void* data, xdg_toplevel*, int32_t width, in
 
         for (size_t index = 0; index < count; ++index)
         {
-            if (cursor[index] == XDG_TOPLEVEL_STATE_FULLSCREEN) surface->fullscreen = true;
+            if (cursor[index] == XDG_TOPLEVEL_STATE_FULLSCREEN) fullscreen = true;
+            if (cursor[index] == XDG_TOPLEVEL_STATE_MAXIMIZED) maximized = true;
         }
     }
 
-    if (width <= 0 || height <= 0) return;
-
-    surface->pendingWidth = static_cast<uint32_t>(width);
-    surface->pendingHeight = static_cast<uint32_t>(height);
+    ApplyWindowState(*surface, fullscreen, maximized, width, height);
 }
 
 static void HandleToplevelClose(void* data, xdg_toplevel*)
@@ -643,9 +893,210 @@ static int CreateAnonymousFile(size_t sizeBytes)
     return fileDescriptor;
 }
 
+static void ShowDefaultCursor(WaylandClient::Connection* connection, wl_pointer* pointer, uint32_t serial)
+{
+    if (!connection->cursorTheme)
+    {
+        const char* size = getenv("XCURSOR_SIZE");
+        const int chosen = size && atoi(size) > 0 ? atoi(size) : WaylandClient::DEFAULT_CURSOR_SIZE;
+
+        connection->cursorTheme = wl_cursor_theme_load(getenv("XCURSOR_THEME"), chosen * (int)connection->outputScale, connection->sharedMemory);
+        if (!connection->cursorTheme) return;
+    }
+
+    wl_cursor* cursor = wl_cursor_theme_get_cursor(connection->cursorTheme, WaylandClient::DEFAULT_CURSOR);
+    if (!cursor) cursor = wl_cursor_theme_get_cursor(connection->cursorTheme, WaylandClient::FALLBACK_CURSOR);
+    if (!cursor || cursor->image_count == 0) return;
+
+    wl_cursor_image* image = cursor->images[0];
+    wl_buffer* buffer = wl_cursor_image_get_buffer(image);
+    if (!buffer) return;
+
+    if (!connection->cursorSurface) connection->cursorSurface = wl_compositor_create_surface(connection->compositor);
+
+    const int32_t scale = (int32_t)connection->outputScale;
+
+    if (gCompositorVersion >= WL_SURFACE_SET_BUFFER_SCALE_SINCE_VERSION) wl_surface_set_buffer_scale(connection->cursorSurface, scale);
+    wl_surface_attach(connection->cursorSurface, buffer, 0, 0);
+    wl_surface_damage(connection->cursorSurface, 0, 0, (int32_t)image->width, (int32_t)image->height);
+    wl_surface_commit(connection->cursorSurface);
+
+    wl_pointer_set_cursor(pointer, serial, connection->cursorSurface, (int32_t)image->hotspot_x / scale, (int32_t)image->hotspot_y / scale);
+}
+
+#if defined(RUNTIME_HAVE_LIBDECOR)
+struct FrameLibrary
+{
+    void* handle = nullptr;
+    bool attempted = false;
+    decltype(&libdecor_new) create = nullptr;
+    decltype(&libdecor_unref) release = nullptr;
+    decltype(&libdecor_dispatch) dispatch = nullptr;
+    decltype(&libdecor_decorate) decorate = nullptr;
+    decltype(&libdecor_frame_unref) releaseFrame = nullptr;
+    decltype(&libdecor_frame_set_title) setTitle = nullptr;
+    decltype(&libdecor_frame_set_app_id) setApplicationId = nullptr;
+    decltype(&libdecor_frame_set_fullscreen) setFullscreen = nullptr;
+    decltype(&libdecor_frame_unset_fullscreen) unsetFullscreen = nullptr;
+    decltype(&libdecor_frame_map) map = nullptr;
+    decltype(&libdecor_frame_commit) commit = nullptr;
+    decltype(&libdecor_frame_get_xdg_surface) shellSurface = nullptr;
+    decltype(&libdecor_frame_get_xdg_toplevel) toplevel = nullptr;
+    decltype(&libdecor_state_new) createState = nullptr;
+    decltype(&libdecor_state_free) freeState = nullptr;
+    decltype(&libdecor_configuration_get_content_size) contentSize = nullptr;
+    decltype(&libdecor_configuration_get_window_state) windowState = nullptr;
+};
+
+static FrameLibrary gFrames;
+
+template <typename Function> static bool ResolveFrameFunction(const char* name, Function& function)
+{
+    function = reinterpret_cast<Function>(dlsym(gFrames.handle, name));
+    return function != nullptr;
+}
+
+static bool LoadFrameLibrary()
+{
+    if (gFrames.attempted) return gFrames.handle != nullptr;
+    gFrames.attempted = true;
+
+    gFrames.handle = dlopen(WaylandClient::FRAME_LIBRARY, RTLD_NOW | RTLD_LOCAL);
+    if (!gFrames.handle)
+    {
+        fprintf(stderr, "[waylandclient] %s is not installed, so the window has a title bar only if the compositor draws one\n",
+                WaylandClient::FRAME_LIBRARY);
+        return false;
+    }
+
+    bool resolved = ResolveFrameFunction("libdecor_new", gFrames.create) && ResolveFrameFunction("libdecor_unref", gFrames.release) &&
+                    ResolveFrameFunction("libdecor_dispatch", gFrames.dispatch) &&
+                    ResolveFrameFunction("libdecor_decorate", gFrames.decorate) &&
+                    ResolveFrameFunction("libdecor_frame_unref", gFrames.releaseFrame) &&
+                    ResolveFrameFunction("libdecor_frame_set_title", gFrames.setTitle) &&
+                    ResolveFrameFunction("libdecor_frame_set_app_id", gFrames.setApplicationId) &&
+                    ResolveFrameFunction("libdecor_frame_set_fullscreen", gFrames.setFullscreen) &&
+                    ResolveFrameFunction("libdecor_frame_unset_fullscreen", gFrames.unsetFullscreen) &&
+                    ResolveFrameFunction("libdecor_frame_map", gFrames.map) && ResolveFrameFunction("libdecor_frame_commit", gFrames.commit) &&
+                    ResolveFrameFunction("libdecor_frame_get_xdg_surface", gFrames.shellSurface) &&
+                    ResolveFrameFunction("libdecor_frame_get_xdg_toplevel", gFrames.toplevel) &&
+                    ResolveFrameFunction("libdecor_state_new", gFrames.createState) &&
+                    ResolveFrameFunction("libdecor_state_free", gFrames.freeState) &&
+                    ResolveFrameFunction("libdecor_configuration_get_content_size", gFrames.contentSize) &&
+                    ResolveFrameFunction("libdecor_configuration_get_window_state", gFrames.windowState);
+
+    if (resolved) return true;
+
+    fprintf(stderr, "[waylandclient] %s lacks functions this runtime needs, so it is not used\n", WaylandClient::FRAME_LIBRARY);
+    dlclose(gFrames.handle);
+    gFrames.handle = nullptr;
+    return false;
+}
+
+static void HandleFrameError(libdecor*, libdecor_error, const char* message)
+{
+    fprintf(stderr, "[waylandclient] the window frame failed: %s\n", message ? message : "no reason given");
+}
+
+static libdecor_interface FRAME_CONTEXT_INTERFACE = {HandleFrameError, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                                     nullptr,          nullptr, nullptr, nullptr, nullptr};
+
+static void HandleFrameConfigure(libdecor_frame* frame, libdecor_configuration* configuration, void* data)
+{
+    WaylandClient::Surface* surface = static_cast<WaylandClient::Surface*>(data);
+
+    libdecor_window_state state = LIBDECOR_WINDOW_STATE_NONE;
+    if (!gFrames.windowState(configuration, &state)) state = LIBDECOR_WINDOW_STATE_NONE;
+
+    int width = 0;
+    int height = 0;
+    if (!gFrames.contentSize(configuration, frame, &width, &height))
+    {
+        width = 0;
+        height = 0;
+    }
+
+    ApplyWindowState(*surface, (state & LIBDECOR_WINDOW_STATE_FULLSCREEN) != 0, (state & LIBDECOR_WINDOW_STATE_MAXIMIZED) != 0, width,
+                     height);
+
+    const uint32_t committedWidth = surface->pendingWidth > 0 ? surface->pendingWidth : surface->width;
+    const uint32_t committedHeight = surface->pendingHeight > 0 ? surface->pendingHeight : surface->height;
+
+    libdecor_state* committed = gFrames.createState((int)committedWidth, (int)committedHeight);
+    gFrames.commit(frame, committed, configuration);
+    gFrames.freeState(committed);
+
+    surface->configured = true;
+}
+
+static void HandleFrameClose(libdecor_frame*, void* data)
+{
+    WaylandClient::Surface* surface = static_cast<WaylandClient::Surface*>(data);
+    surface->closeRequested = true;
+}
+
+static void HandleFrameCommit(libdecor_frame*, void* data)
+{
+    WaylandClient::Surface* surface = static_cast<WaylandClient::Surface*>(data);
+    if (surface->surface) wl_surface_commit(surface->surface);
+}
+
+static void HandleFramePopupDismissed(libdecor_frame*, const char*, void*)
+{
+}
+
+static libdecor_frame_interface FRAME_INTERFACE = {HandleFrameConfigure, HandleFrameClose, HandleFrameCommit, HandleFramePopupDismissed,
+                                                   nullptr,              nullptr,          nullptr,           nullptr,
+                                                   nullptr,              nullptr,          nullptr,           nullptr,
+                                                   nullptr,              nullptr};
+
+static bool OpenFrames(WaylandClient::Connection& connection)
+{
+    if (connection.frames) return true;
+    if (!LoadFrameLibrary()) return false;
+
+    connection.frames = gFrames.create(connection.display, &FRAME_CONTEXT_INTERFACE);
+    return connection.frames != nullptr;
+}
+
+static bool DecorateWithFrames(WaylandClient::Connection& connection, WaylandClient::Surface& surface, const char* title)
+{
+    if (!OpenFrames(connection)) return false;
+
+    surface.frame = gFrames.decorate(connection.frames, surface.surface, &FRAME_INTERFACE, &surface);
+    if (!surface.frame) return false;
+
+    gFrames.setTitle(surface.frame, title ? title : WaylandClient::DEFAULT_TITLE);
+    gFrames.setApplicationId(surface.frame, WaylandClient::DEFAULT_APPLICATION_ID);
+
+    if (FullscreenRequested())
+    {
+        gFrames.setFullscreen(surface.frame, nullptr);
+        fprintf(stderr, "[waylandclient] the window asked the compositor for the whole output\n");
+    }
+
+    gFrames.map(surface.frame);
+
+    surface.shellSurface = gFrames.shellSurface(surface.frame);
+    surface.toplevel = gFrames.toplevel(surface.frame);
+
+    const uint64_t deadline = InputNanos() + (uint64_t)WaylandClient::CONNECT_TIMEOUT_MILLIS * 1000000ull;
+
+    while (!surface.configured && InputNanos() < deadline)
+    {
+        if (gFrames.dispatch(connection.frames, WaylandClient::CONNECT_TIMEOUT_MILLIS) < 0) break;
+    }
+
+    if (surface.configured) fprintf(stderr, "[waylandclient] the window frame comes from libdecor\n");
+
+    return true;
+}
+#endif
+
 static std::string CompositorSocketPath()
 {
     const char* configured = Settings::Lookup(WaylandClient::SOCKET_SETTING);
+    if (!configured || !*configured) configured = getenv("WAYLAND_DISPLAY");
 
     if (configured && *configured)
     {
@@ -790,6 +1241,12 @@ WaylandClient::Result WaylandClient::Connect(Connection& connection)
         return Result::NoShell;
     }
 
+    if (connection.dmabuf && !RoundtripWithin(connection.display, CONNECT_TIMEOUT_MILLIS))
+    {
+        Disconnect(connection);
+        return Result::NoDisplay;
+    }
+
     connection.fileDescriptor = wl_display_get_fd(connection.display);
 
     return Result::Ok;
@@ -804,7 +1261,14 @@ void WaylandClient::Disconnect(Connection& connection)
     if (connection.keyboardState) xkb_state_unref((xkb_state*)connection.keyboardState);
     if (connection.keyboardMap) xkb_keymap_unref((xkb_keymap*)connection.keyboardMap);
     if (connection.keyboardContext) xkb_context_unref((xkb_context*)connection.keyboardContext);
+#if defined(RUNTIME_HAVE_LIBDECOR)
+    if (connection.frames) gFrames.release(connection.frames);
+#endif
+    if (connection.cursorSurface) wl_surface_destroy(connection.cursorSurface);
+    if (connection.cursorTheme) wl_cursor_theme_destroy(connection.cursorTheme);
     if (connection.presentation) wp_presentation_destroy(connection.presentation);
+    if (connection.viewporter) wp_viewporter_destroy(connection.viewporter);
+    ReleaseDmabuf(connection);
     if (connection.shell) xdg_wm_base_destroy(connection.shell);
     if (connection.sharedMemory) wl_shm_destroy(connection.sharedMemory);
     if (connection.compositor) wl_compositor_destroy(connection.compositor);
@@ -971,6 +1435,16 @@ WaylandClient::Result WaylandClient::SetFullscreen(Surface& surface, bool fullsc
 {
     if (!surface.toplevel) return Result::NoShell;
 
+#if defined(RUNTIME_HAVE_LIBDECOR)
+    if (surface.frame)
+    {
+        if (fullscreen) gFrames.setFullscreen(surface.frame, nullptr);
+        else gFrames.unsetFullscreen(surface.frame);
+
+        return Result::Ok;
+    }
+#endif
+
     if (fullscreen) xdg_toplevel_set_fullscreen(surface.toplevel, nullptr);
     else xdg_toplevel_unset_fullscreen(surface.toplevel);
 
@@ -987,34 +1461,56 @@ bool WaylandClient::ConsumeResize(Surface& surface, uint32_t& width, uint32_t& h
     return true;
 }
 
-WaylandClient::Result WaylandClient::CreateSurface(Connection& connection, uint32_t width, uint32_t height, const char* title, Surface& surface)
+static WaylandClient::Result CreateToplevel(WaylandClient::Connection& connection, uint32_t width, uint32_t height, const char* title,
+                                            bool hosted, WaylandClient::Surface& surface)
 {
-    if (!connection.display) return Result::NotConnected;
-    if (width < MIN_DIMENSION || height < MIN_DIMENSION) return Result::InvalidGeometry;
-    if (width > MAX_DIMENSION || height > MAX_DIMENSION) return Result::InvalidGeometry;
+    using WaylandClient::Result;
 
-    Result allocated = AllocateBufferPool(connection, surface, width, height);
-    if (allocated != Result::Ok) return allocated;
+    if (!connection.display) return Result::NotConnected;
+    if (width < WaylandClient::MIN_DIMENSION || height < WaylandClient::MIN_DIMENSION) return Result::InvalidGeometry;
+    if (width > WaylandClient::MAX_DIMENSION || height > WaylandClient::MAX_DIMENSION) return Result::InvalidGeometry;
+
+    if (hosted)
+    {
+        surface.width = width;
+        surface.height = height;
+    }
+    else
+    {
+        Result allocated = AllocateBufferPool(connection, surface, width, height);
+        if (allocated != Result::Ok) return allocated;
+    }
 
     surface.surface = wl_compositor_create_surface(connection.compositor);
+    connection.contentSurface = surface.surface;
+
+#if defined(RUNTIME_HAVE_LIBDECOR)
+    if (hosted && DecorationRequested() && FramesWanted() && DecorateWithFrames(connection, surface, title))
+    {
+        if (surface.configured) return Result::Ok;
+
+        fprintf(stderr, "[waylandclient] libdecor did not configure the window in time, so it opens with no frame of its own\n");
+        DestroySurface(surface);
+        surface.surface = wl_compositor_create_surface(connection.compositor);
+        surface.width = width;
+        surface.height = height;
+        connection.contentSurface = surface.surface;
+    }
+#endif
+
     surface.shellSurface = xdg_wm_base_get_xdg_surface(connection.shell, surface.surface);
     xdg_surface_add_listener(surface.shellSurface, &SHELL_SURFACE_LISTENER, &surface);
 
     surface.toplevel = xdg_surface_get_toplevel(surface.shellSurface);
     xdg_toplevel_add_listener(surface.toplevel, &TOPLEVEL_LISTENER, &surface);
-    xdg_toplevel_set_title(surface.toplevel, title ? title : DEFAULT_TITLE);
-    xdg_toplevel_set_app_id(surface.toplevel, DEFAULT_APPLICATION_ID);
+    xdg_toplevel_set_title(surface.toplevel, title ? title : WaylandClient::DEFAULT_TITLE);
+    xdg_toplevel_set_app_id(surface.toplevel, WaylandClient::DEFAULT_APPLICATION_ID);
 
-    if (DecorationRequested())
+    if (DecorationRequested() && connection.decorations)
     {
-        if (!connection.decorations)
-            fprintf(stderr, "[waylandclient] this compositor does not offer window decorations, so the window has none\n");
-        else
-        {
-            surface.decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(connection.decorations, surface.toplevel);
-            zxdg_toplevel_decoration_v1_add_listener(surface.decoration, &DECORATION_LISTENER, &surface);
-            zxdg_toplevel_decoration_v1_set_mode(surface.decoration, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-        }
+        surface.decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(connection.decorations, surface.toplevel);
+        zxdg_toplevel_decoration_v1_add_listener(surface.decoration, &DECORATION_LISTENER, &surface);
+        zxdg_toplevel_decoration_v1_set_mode(surface.decoration, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
     }
 
     if (FullscreenRequested())
@@ -1028,11 +1524,199 @@ WaylandClient::Result WaylandClient::CreateSurface(Connection& connection, uint3
 
     if (!surface.configured)
     {
-        DestroySurface(surface);
+        WaylandClient::DestroySurface(surface);
         return Result::NoShell;
     }
 
+    if (DecorationRequested() && !surface.decorated) fprintf(stderr, "[waylandclient] the compositor draws no window frame, so the window has none\n");
+
     return Result::Ok;
+}
+
+WaylandClient::Result WaylandClient::CreateSurface(Connection& connection, uint32_t width, uint32_t height, const char* title, Surface& surface)
+{
+    return CreateToplevel(connection, width, height, title, false, surface);
+}
+
+WaylandClient::Result WaylandClient::CreateHostedSurface(Connection& connection, uint32_t width, uint32_t height, const char* title,
+                                                         Surface& surface)
+{
+    return CreateToplevel(connection, width, height, title, true, surface);
+}
+
+WaylandClient::Result WaylandClient::SetTitle(Surface& surface, const char* title)
+{
+    const char* shown = title && title[0] != '\0' ? title : DEFAULT_TITLE;
+
+#if defined(RUNTIME_HAVE_LIBDECOR)
+    if (surface.frame)
+    {
+        gFrames.setTitle(surface.frame, shown);
+        return Result::Ok;
+    }
+#endif
+
+    if (!surface.toplevel) return Result::NoShell;
+
+    xdg_toplevel_set_title(surface.toplevel, shown);
+    return Result::Ok;
+}
+
+struct ExternalBuffer
+{
+    WaylandClient::ReleaseCallback callback = nullptr;
+    void* context = nullptr;
+};
+
+static void HandleExternalBufferRelease(void* data, wl_buffer*)
+{
+    ExternalBuffer* holder = static_cast<ExternalBuffer*>(data);
+    if (holder->callback) holder->callback(holder->context);
+}
+
+static const wl_buffer_listener EXTERNAL_BUFFER_LISTENER = {HandleExternalBufferRelease};
+
+static wl_buffer* AdoptExternalBuffer(wl_buffer* buffer, WaylandClient::ReleaseCallback callback, void* context)
+{
+    if (!buffer) return nullptr;
+
+    ExternalBuffer* holder = new ExternalBuffer;
+    holder->callback = callback;
+    holder->context = context;
+    wl_buffer_add_listener(buffer, &EXTERNAL_BUFFER_LISTENER, holder);
+
+    return buffer;
+}
+
+static uint32_t SharedMemoryFormatFor(uint32_t fourcc)
+{
+    if (fourcc == WaylandClient::FOURCC_ARGB8888) return WL_SHM_FORMAT_ARGB8888;
+    if (fourcc == WaylandClient::FOURCC_XRGB8888) return WL_SHM_FORMAT_XRGB8888;
+
+    return fourcc;
+}
+
+wl_buffer* WaylandClient::ImportSharedBuffer(Connection& connection, int fileDescriptor, uint32_t width, uint32_t height, uint32_t stride,
+                                             uint32_t format, ReleaseCallback callback, void* context)
+{
+    if (!connection.sharedMemory || fileDescriptor < 0) return nullptr;
+    if (width < MIN_DIMENSION || height < MIN_DIMENSION || width > MAX_DIMENSION || height > MAX_DIMENSION) return nullptr;
+    if (stride < width * BYTES_PER_PIXEL) return nullptr;
+
+    size_t sizeBytes = (size_t)stride * height;
+    if (sizeBytes > (size_t)INT32_MAX) return nullptr;
+
+    wl_shm_pool* pool = wl_shm_create_pool(connection.sharedMemory, fileDescriptor, (int32_t)sizeBytes);
+    if (!pool) return nullptr;
+
+    wl_buffer* buffer = wl_shm_pool_create_buffer(pool, 0, (int32_t)width, (int32_t)height, (int32_t)stride, SharedMemoryFormatFor(format));
+    wl_shm_pool_destroy(pool);
+
+    return AdoptExternalBuffer(buffer, callback, context);
+}
+
+struct DmabufCreation
+{
+    wl_buffer* buffer = nullptr;
+    bool finished = false;
+};
+
+static void HandleParamsCreated(void* data, zwp_linux_buffer_params_v1*, wl_buffer* buffer)
+{
+    DmabufCreation* creation = static_cast<DmabufCreation*>(data);
+    creation->buffer = buffer;
+    creation->finished = true;
+}
+
+static void HandleParamsFailed(void* data, zwp_linux_buffer_params_v1*)
+{
+    DmabufCreation* creation = static_cast<DmabufCreation*>(data);
+    creation->finished = true;
+}
+
+static const zwp_linux_buffer_params_v1_listener PARAMS_LISTENER = {HandleParamsCreated, HandleParamsFailed};
+
+wl_buffer* WaylandClient::ImportDmabuf(Connection& connection, const int* fileDescriptors, const uint32_t* offsets, const uint32_t* strides,
+                                       uint32_t planeCount, uint32_t width, uint32_t height, uint32_t format, uint64_t modifier,
+                                       ReleaseCallback callback, void* context)
+{
+    if (!connection.dmabuf || planeCount == 0 || planeCount > MAX_BUFFER_PLANES) return nullptr;
+    if (width < MIN_DIMENSION || height < MIN_DIMENSION || width > MAX_DIMENSION || height > MAX_DIMENSION) return nullptr;
+
+    zwp_linux_buffer_params_v1* params = zwp_linux_dmabuf_v1_create_params(connection.dmabuf);
+    if (!params) return nullptr;
+
+    for (uint32_t plane = 0; plane < planeCount; ++plane)
+    {
+        zwp_linux_buffer_params_v1_add(params, fileDescriptors[plane], plane, offsets[plane], strides[plane], (uint32_t)(modifier >> 32),
+                                       (uint32_t)(modifier & 0xffffffffu));
+    }
+
+    DmabufCreation creation{};
+    zwp_linux_buffer_params_v1_add_listener(params, &PARAMS_LISTENER, &creation);
+    zwp_linux_buffer_params_v1_create(params, (int32_t)width, (int32_t)height, format, 0);
+
+    const uint64_t deadline = InputNanos() + (uint64_t)CONNECT_TIMEOUT_MILLIS * 1000000ull;
+    while (!creation.finished && InputNanos() < deadline)
+    {
+        if (!RoundtripWithin(connection.display, CONNECT_TIMEOUT_MILLIS)) break;
+    }
+
+    zwp_linux_buffer_params_v1_destroy(params);
+
+    if (!creation.buffer)
+    {
+        fprintf(stderr, "[waylandclient] the compositor refused a %ux%u gpu buffer of format %08x, modifier %016llx\n", width, height, format,
+                (unsigned long long)modifier);
+        return nullptr;
+    }
+
+    return AdoptExternalBuffer(creation.buffer, callback, context);
+}
+
+void WaylandClient::DestroyExternalBuffer(wl_buffer* buffer)
+{
+    if (!buffer) return;
+
+    delete static_cast<ExternalBuffer*>(wl_buffer_get_user_data(buffer));
+    wl_buffer_destroy(buffer);
+}
+
+WaylandClient::Result WaylandClient::PresentExternal(Connection& connection, Surface& surface, wl_buffer* buffer, uint32_t width, uint32_t height,
+                                                     uint32_t shownWidth, uint32_t shownHeight)
+{
+    if (!connection.display) return Result::NotConnected;
+    if (!surface.surface || !buffer) return Result::InvalidGeometry;
+
+    bool scaled = shownWidth > 0 && shownHeight > 0 && (shownWidth != width || shownHeight != height);
+
+    if (scaled && !surface.viewport && connection.viewporter)
+    {
+        surface.viewport = wp_viewporter_get_viewport(connection.viewporter, surface.surface);
+    }
+
+    if (surface.viewport)
+    {
+        if (scaled) wp_viewport_set_destination(surface.viewport, (int32_t)shownWidth, (int32_t)shownHeight);
+        else wp_viewport_set_destination(surface.viewport, -1, -1);
+    }
+
+    surface.width = surface.viewport && scaled ? shownWidth : width;
+    surface.height = surface.viewport && scaled ? shownHeight : height;
+
+    wl_surface_attach(surface.surface, buffer, 0, 0);
+
+    if (gCompositorVersion >= WL_SURFACE_DAMAGE_BUFFER_SINCE_VERSION)
+    {
+        wl_surface_damage_buffer(surface.surface, 0, 0, (int32_t)width, (int32_t)height);
+    }
+    else
+    {
+        wl_surface_damage(surface.surface, 0, 0, (int32_t)width, (int32_t)height);
+    }
+
+    wl_surface_commit(surface.surface);
+    return Flush(connection);
 }
 
 void WaylandClient::DestroySurface(Surface& surface)
@@ -1052,6 +1736,17 @@ void WaylandClient::DestroySurface(Surface& surface)
     if (surface.poolBase) munmap(surface.poolBase, surface.poolSizeBytes);
     if (surface.poolFileDescriptor >= 0) close(surface.poolFileDescriptor);
 
+#if defined(RUNTIME_HAVE_LIBDECOR)
+    if (surface.frame)
+    {
+        gFrames.releaseFrame(surface.frame);
+        surface.frame = nullptr;
+        surface.toplevel = nullptr;
+        surface.shellSurface = nullptr;
+    }
+#endif
+
+    if (surface.viewport) wp_viewport_destroy(surface.viewport);
     if (surface.decoration) zxdg_toplevel_decoration_v1_destroy(surface.decoration);
     if (surface.toplevel) xdg_toplevel_destroy(surface.toplevel);
     if (surface.shellSurface) xdg_surface_destroy(surface.shellSurface);
@@ -1126,12 +1821,21 @@ WaylandClient::Result WaylandClient::RequestFrame(Connection& connection, Surfac
 WaylandClient::Result WaylandClient::Dispatch(Connection& connection)
 {
     if (!connection.display) return Result::NotConnected;
+
+#if defined(RUNTIME_HAVE_LIBDECOR)
+    if (connection.frames) return gFrames.dispatch(connection.frames, -1) < 0 ? Result::DispatchFailed : Result::Ok;
+#endif
+
     return wl_display_dispatch(connection.display) < 0 ? Result::DispatchFailed : Result::Ok;
 }
 
 WaylandClient::Result WaylandClient::DispatchPending(Connection& connection)
 {
     if (!connection.display) return Result::NotConnected;
+
+#if defined(RUNTIME_HAVE_LIBDECOR)
+    if (connection.frames) return gFrames.dispatch(connection.frames, 0) < 0 ? Result::DispatchFailed : Result::Ok;
+#endif
 
     if (wl_display_prepare_read(connection.display) == 0)
     {

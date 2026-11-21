@@ -28,6 +28,8 @@ set(RUNTIME_MODULES
     Sandbox
     AudioDevice
     ControlChannel
+    HostedWindow
+    WindowHost
     Diagnostics
     ApkSignature
     Overlay
@@ -60,8 +62,8 @@ target_link_libraries(ElfLoader INTERFACE GuestState Platform)
 target_link_libraries(CodeMap INTERFACE ElfLoader GuestState)
 target_link_libraries(GuestRuntime INTERFACE ElfLoader AbiBridge Ir Arm64Decoder Interpreter LlvmBackend GuestState Platform Diagnostics)
 target_link_libraries(GuestLibc INTERFACE GuestRuntime AbiBridge GuestSyscall Platform)
-target_link_libraries(VulkanWsi INTERFACE GuestRuntime AbiBridge Platform)
-target_link_libraries(GlesWsi INTERFACE GuestRuntime AbiBridge Platform Overlay)
+target_link_libraries(VulkanWsi INTERFACE GuestRuntime AbiBridge Platform HostedWindow)
+target_link_libraries(GlesWsi INTERFACE GuestRuntime AbiBridge Platform Overlay HostedWindow)
 target_link_libraries(GuestSyscall INTERFACE GuestState Diagnostics)
 target_link_libraries(JniBridge INTERFACE GuestRuntime AbiBridge Diagnostics)
 target_link_libraries(AheadOfTime INTERFACE GuestRuntime CodeMap Arm64Decoder LlvmBackend TranslationCache)
@@ -197,15 +199,15 @@ if(RUNTIME_ENABLE_VULKAN)
     target_link_libraries(OverlayVulkanImpl PUBLIC Overlay OverlayImpl PRIVATE Vulkan::Headers)
     target_compile_options(OverlayVulkanImpl PRIVATE -Wall -Wextra -Werror)
 
-    add_library(VulkanWsiImpl STATIC VulkanWsi/VulkanWsi.cpp)
-    target_link_libraries(VulkanWsiImpl PUBLIC VulkanWsi GuestRuntimeImpl AbiBridgeImpl Overlay
+    add_library(VulkanWsiImpl STATIC VulkanWsi/VulkanWsi.cpp VulkanWsi/HostedSwapchain.cpp)
+    target_link_libraries(VulkanWsiImpl PUBLIC VulkanWsi GuestRuntimeImpl AbiBridgeImpl Overlay HostedWindowImpl
                           PRIVATE OverlayVulkanImpl OverlayImpl Vulkan::Headers ${CMAKE_DL_LIBS})
     target_compile_options(VulkanWsiImpl PRIVATE -Wall -Wextra -Werror)
 endif()
 
 if(RUNTIME_ENABLE_GLES)
     add_library(GlesWsiImpl STATIC GlesWsi/GlesWsi.cpp)
-    target_link_libraries(GlesWsiImpl PUBLIC GlesWsi GuestRuntimeImpl AbiBridgeImpl Overlay PRIVATE OverlayImpl ${CMAKE_DL_LIBS})
+    target_link_libraries(GlesWsiImpl PUBLIC GlesWsi GuestRuntimeImpl AbiBridgeImpl Overlay HostedWindowImpl PRIVATE OverlayImpl ${CMAKE_DL_LIBS})
     target_include_directories(GlesWsiImpl PRIVATE ${EGL_INCLUDE_DIRS} ${GLESV2_INCLUDE_DIRS} ${WAYLAND_EGL_INCLUDE_DIRS})
     target_compile_options(GlesWsiImpl PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -326,8 +328,13 @@ target_compile_options(ArtRuntime PRIVATE -Werror)
 
 if(RUNTIME_ENABLE_GRAPHICS)
     add_library(WaylandClientImpl STATIC WaylandClient/WaylandClient.cpp)
-    target_link_libraries(WaylandClientImpl PUBLIC WaylandClient PRIVATE PkgConfig::WAYLAND_CLIENT PkgConfig::XKBCOMMON)
+    target_link_libraries(WaylandClientImpl PUBLIC WaylandClient PRIVATE PkgConfig::WAYLAND_CLIENT PkgConfig::WAYLAND_CURSOR
+                          PkgConfig::XKBCOMMON ${CMAKE_DL_LIBS})
     target_compile_options(WaylandClientImpl PRIVATE -Werror)
+    if(LIBDECOR_FOUND)
+        target_include_directories(WaylandClientImpl SYSTEM PRIVATE ${LIBDECOR_INCLUDE_DIRS})
+        target_compile_definitions(WaylandClientImpl PRIVATE RUNTIME_HAVE_LIBDECOR=1)
+    endif()
     set_target_properties(WaylandClientImpl PROPERTIES CXX_SCAN_FOR_MODULES OFF)
 
     runtime_add_wayland_protocol(WaylandClientImpl
@@ -336,6 +343,10 @@ if(RUNTIME_ENABLE_GRAPHICS)
         ${RUNTIME_WAYLAND_PROTOCOLS_DIR}/stable/presentation-time/presentation-time.xml presentation-time)
     runtime_add_wayland_protocol(WaylandClientImpl
         ${RUNTIME_WAYLAND_PROTOCOLS_DIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml xdg-decoration-unstable-v1)
+    runtime_add_wayland_protocol(WaylandClientImpl
+        ${RUNTIME_WAYLAND_PROTOCOLS_DIR}/stable/linux-dmabuf/linux-dmabuf-v1.xml linux-dmabuf-v1)
+    runtime_add_wayland_protocol(WaylandClientImpl
+        ${RUNTIME_WAYLAND_PROTOCOLS_DIR}/stable/viewporter/viewporter.xml viewporter)
 
     add_executable(WindowSmokeTest ${CMAKE_CURRENT_SOURCE_DIR}/../tests/window/WindowSmokeTest.cpp)
     target_link_libraries(WindowSmokeTest PRIVATE WaylandClientImpl RasterizerImpl)
@@ -370,6 +381,17 @@ target_compile_options(ControlChannelImpl PRIVATE -Wall -Wextra -Werror)
 add_executable(ControlChannelUnitTest ${CMAKE_CURRENT_SOURCE_DIR}/../tests/control/ControlChannelUnit.cpp)
 target_link_libraries(ControlChannelUnitTest PRIVATE ControlChannelImpl)
 target_compile_options(ControlChannelUnitTest PRIVATE -Wall -Wextra -Werror)
+
+target_link_libraries(HostedWindow INTERFACE ControlChannel WaylandClient)
+target_link_libraries(WindowHost INTERFACE ControlChannel WaylandClient)
+
+add_library(HostedWindowImpl STATIC HostedWindow/HostedWindow.cpp)
+target_link_libraries(HostedWindowImpl PUBLIC HostedWindow ControlChannelImpl Threads::Threads)
+target_compile_options(HostedWindowImpl PRIVATE -Wall -Wextra -Werror)
+
+add_library(WindowHostImpl STATIC WindowHost/WindowHost.cpp)
+target_link_libraries(WindowHostImpl PUBLIC WindowHost ControlChannelImpl PRIVATE WaylandClientImpl)
+target_compile_options(WindowHostImpl PRIVATE -Wall -Wextra -Werror)
 
 add_executable(HostedWindowHarness ${CMAKE_CURRENT_SOURCE_DIR}/../tests/hosted/HostedWindowHarness.cpp)
 target_link_libraries(HostedWindowHarness PRIVATE ControlChannelImpl)
@@ -425,15 +447,15 @@ target_compile_definitions(TextGoldenTest PRIVATE RUNTIME_DEFAULT_FONT_DIR="${RU
 target_compile_options(TextGoldenTest PRIVATE -Werror)
 
 
-add_library(FrameworkJni STATIC FrameworkJni/FrameworkJni.cpp FrameworkJni/WindowBridge.cpp FrameworkJni/HostedWindow.cpp
+add_library(FrameworkJni STATIC FrameworkJni/FrameworkJni.cpp FrameworkJni/WindowBridge.cpp
                                 FrameworkJni/ResourceBridge.cpp
                                 FrameworkJni/TextBridge.cpp FrameworkJni/SqliteBridge.cpp
                                 FrameworkJni/GraphicsBridge.cpp FrameworkJni/BitmapBridge.cpp)
 target_include_directories(FrameworkJni PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/FrameworkJni/include)
-target_link_libraries(FrameworkJni PUBLIC ArtRuntime Apk PackageRegistry Rasterizer FontStack WaylandClient ControlChannel Diagnostics
-                                          ApkSignature Overlay
+target_link_libraries(FrameworkJni PUBLIC ArtRuntime Apk PackageRegistry Rasterizer FontStack WaylandClient ControlChannel HostedWindow
+                                          Diagnostics ApkSignature Overlay
                       PRIVATE ApkImpl PackageRegistryImpl RasterizerImpl FontStackImpl WaylandClientImpl ImageCodecImpl androidfw_c
-                              ControlChannelImpl ApkSignatureImpl OverlayImpl PkgConfig::SQLITE3)
+                              ControlChannelImpl HostedWindowImpl ApkSignatureImpl OverlayImpl PkgConfig::SQLITE3)
 target_compile_options(FrameworkJni PRIVATE -Werror)
 
 if(RUNTIME_ENABLE_VULKAN)
@@ -449,7 +471,7 @@ endif()
 add_executable(acl Launcher/Main.cpp Launcher/Launcher.cpp)
 target_include_directories(acl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Launcher/include)
 target_link_libraries(acl PRIVATE FrameworkJni ApkImpl ArtRuntime GuestLibcImpl JniBridgeImpl AheadOfTimeImpl NativeActivityImpl SandboxImpl DiagnosticsImpl
-                      TranslationCacheImpl SettingsImpl)
+                      TranslationCacheImpl SettingsImpl WindowHostImpl WaylandClientImpl)
 target_compile_definitions(acl PRIVATE RUNTIME_DEFAULT_FONT_DIR="${RUNTIME_FONT_DIR}")
 if(RUNTIME_ENABLE_VULKAN)
     target_link_libraries(acl PRIVATE VulkanWsiImpl)
@@ -689,6 +711,10 @@ set_tests_properties(guest-vulkan-gate PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30
 add_test(NAME gles-gate
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/run-gles-gate.sh ${CMAKE_BINARY_DIR})
 set_tests_properties(gles-gate PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+
+add_test(NAME window-host-gate
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/run-window-host-gate.sh ${CMAKE_BINARY_DIR})
+set_tests_properties(window-host-gate PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
 
 add_test(NAME view-transform-gate
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/run-view-transform-gate.sh ${CMAKE_BINARY_DIR})
