@@ -128,6 +128,7 @@ public class ApplicationInfo extends PackageItemInfo implements Parcelable
     public java.util.UUID storageUuid;
     public String processName;
     public boolean enabled = true;
+    private int localeConfigRes = 0;
 
     public ApplicationInfo()
     {
@@ -239,6 +240,9 @@ public class ApplicationInfo extends PackageItemInfo implements Parcelable
     {
         return RAW_EXTERNAL_STORAGE_ACCESS_DEFAULT;
     }
+    public int getLocaleConfigRes() {
+            return localeConfigRes;
+   }
 
     public boolean isVirtualPreload()
     {

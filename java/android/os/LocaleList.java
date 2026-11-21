@@ -37,7 +37,19 @@ public final class LocaleList
         }
         return -1;
     }
+    public static final @android.annotation.NonNull Parcelable.Creator<LocaleList> CREATOR
+                = new Parcelable.Creator<LocaleList>() {
+            @Override
+            public LocaleList createFromParcel(Parcel source) {
+            /*fixme:readString8*/
+                return LocaleList.forLanguageTags(source.readString());
+            }
 
+            @Override
+            public LocaleList[] newArray(int size) {
+                return new LocaleList[size];
+            }
+        };
     public static LocaleList getEmptyLocaleList()
     {
         return EMPTY;

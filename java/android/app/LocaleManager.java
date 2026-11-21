@@ -1,7 +1,8 @@
 package android.app;
 
 import android.os.LocaleList;
-
+import android.annotation.Nullable;
+import android.os.RemoteException;
 public final class LocaleManager
 {
     private LocaleList mApplicationLocales = LocaleList.getEmptyLocaleList();
@@ -25,4 +26,12 @@ public final class LocaleManager
     {
         return LocaleList.getDefault();
     }
+     @Nullable
+     public LocaleConfig getOverrideLocaleConfig() {
+     try{
+          throw new RemoteException("fixme:getOverrideLocaleConfig");
+          } catch (RemoteException e) {
+                      throw e.rethrowFromSystemServer();
+        }
+     }
 }

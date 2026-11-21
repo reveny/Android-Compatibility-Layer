@@ -1,14 +1,23 @@
 package android.util;
-
+import android.annotation.IntDef;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 public final class Log
 {
+    @IntDef({ASSERT, ERROR, WARN, INFO, DEBUG, VERBOSE})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface Level {}
     public static final int VERBOSE = 2;
     public static final int DEBUG = 3;
     public static final int INFO = 4;
     public static final int WARN = 5;
     public static final int ERROR = 6;
     public static final int ASSERT = 7;
-
+      /** @hide */ public static final int LOG_ID_MAIN = 0;
+        /** @hide */ public static final int LOG_ID_RADIO = 1;
+        /** @hide */ public static final int LOG_ID_EVENTS = 2;
+        /** @hide */ public static final int LOG_ID_SYSTEM = 3;
+        /** @hide */ public static final int LOG_ID_CRASH = 4;
     private Log()
     {
     }
