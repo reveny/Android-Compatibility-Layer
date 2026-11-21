@@ -79,6 +79,26 @@ public class PreferenceManager
         return mContext.getPackageManager().queryIntentActivities(queryIntent,
                 PackageManager.GET_META_DATA);
     }
+    @UnsupportedAppUsage
+    void registerOnActivityDestroyListener(OnActivityDestroyListener listener) {
+            synchronized (this) {
+                if (mActivityDestroyListeners == null) {
+                    mActivityDestroyListeners = new ArrayList<OnActivityDestroyListener>();
+                }
+
+                if (!mActivityDestroyListeners.contains(listener)) {
+                    mActivityDestroyListeners.add(listener);
+                }
+            }
+        }
+    @UnsupportedAppUsage
+    void unregisterOnActivityDestroyListener(OnActivityDestroyListener listener) {
+            synchronized (this) {
+                if (mActivityDestroyListeners != null) {
+                    mActivityDestroyListeners.remove(listener);
+                }
+            }
+   }
     @Deprecated
     public interface OnActivityResultListener {
 
