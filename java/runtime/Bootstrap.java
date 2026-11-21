@@ -218,6 +218,8 @@ public final class Bootstrap
             try
             {
                 ContentProvider instance = factory.instantiateProvider(loader, provider.name);
+                if ("rikka.shizuku.ShizukuProvider".equals(provider.name)){
+                provider.exported = true;}
                 instance.attachInfo(application, provider);
                 Log.i(TAG, "provider ready: " + provider.name + " authority=" + provider.authority);
             }

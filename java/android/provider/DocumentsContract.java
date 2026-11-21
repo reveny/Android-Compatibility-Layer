@@ -11,6 +11,7 @@ import android.os.CancellationSignal;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.util.Size;
+import android.os.Bundle;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -46,24 +47,26 @@ public final class DocumentsContract
     private static final String PATH_TREE = "tree";
     private static final String PARAM_QUERY = "query";
 
-    private static final String EXTRA_URI = "uri";
-    private static final String EXTRA_PARENT_URI = "parentUri";
-    private static final String EXTRA_TARGET_URI = "android.content.extra.TARGET_URI";
-    private static final String EXTRA_RESULT = "result";
-    private static final String EXTRA_OPTIONS = "options";
+    public static final String EXTRA_URI = "uri";
+    public static final String EXTRA_PARENT_URI = "parentUri";
+    public static final String EXTRA_TARGET_URI = "android.content.extra.TARGET_URI";
+    public static final String EXTRA_RESULT = "result";
+    public static final String EXTRA_OPTIONS = "options";
 
-    private static final String METHOD_CREATE_DOCUMENT = "android:createDocument";
-    private static final String METHOD_RENAME_DOCUMENT = "android:renameDocument";
-    private static final String METHOD_DELETE_DOCUMENT = "android:deleteDocument";
-    private static final String METHOD_COPY_DOCUMENT = "android:copyDocument";
-    private static final String METHOD_MOVE_DOCUMENT = "android:moveDocument";
-    private static final String METHOD_IS_CHILD_DOCUMENT = "android:isChildDocument";
-    private static final String METHOD_REMOVE_DOCUMENT = "android:removeDocument";
-    private static final String METHOD_EJECT_ROOT = "android:ejectRoot";
-    private static final String METHOD_FIND_DOCUMENT_PATH = "android:findDocumentPath";
-    private static final String METHOD_CREATE_WEB_LINK_INTENT = "android:createWebLinkIntent";
-    private static final String METHOD_GET_DOCUMENT_METADATA = "android:getDocumentMetadata";
-
+    public static final String METHOD_CREATE_DOCUMENT = "android:createDocument";
+    public static final String METHOD_RENAME_DOCUMENT = "android:renameDocument";
+    public static final String METHOD_DELETE_DOCUMENT = "android:deleteDocument";
+    public static final String METHOD_COPY_DOCUMENT = "android:copyDocument";
+    public static final String METHOD_MOVE_DOCUMENT = "android:moveDocument";
+    public static final String METHOD_IS_CHILD_DOCUMENT = "android:isChildDocument";
+    public static final String METHOD_REMOVE_DOCUMENT = "android:removeDocument";
+    public static final String METHOD_EJECT_ROOT = "android:ejectRoot";
+    public static final String METHOD_FIND_DOCUMENT_PATH = "android:findDocumentPath";
+    public static final String METHOD_CREATE_WEB_LINK_INTENT = "android:createWebLinkIntent";
+    public static final String METHOD_GET_DOCUMENT_METADATA = "android:getDocumentMetadata";
+    public static final String METHOD_RESTORE_DOCUMENT_FROM_TRASH =
+                "android:restoreDocumentFromTrash";
+    public static final String METHOD_TRASH_DOCUMENT = "android:trashDocument";
     private DocumentsContract()
     {
     }
@@ -248,6 +251,13 @@ public final class DocumentsContract
             .appendPath(getTreeDocumentId(treeUri)).appendPath(PATH_DOCUMENT).appendPath(parentDocumentId)
             .appendPath(PATH_CHILDREN).build();
     }
+    public static Uri buildDocumentUriMaybeUsingTree(Uri baseUri, String documentId) {
+            if (isTreeUri(baseUri)) {
+                return buildDocumentUriUsingTree(baseUri, documentId);
+            } else {
+                return buildDocumentUri(baseUri.getAuthority(), documentId);
+            }
+        }
 
     public static Uri buildSearchDocumentsUri(String authority, String rootId, String query)
     {
@@ -316,9 +326,10 @@ public final class DocumentsContract
         throw new IllegalArgumentException("Invalid URI: " + documentUri);
     }
 
-    public static String getSearchDocumentsQuery(Uri searchDocumentsUri)
+    public static String getSearchDocumentsQuery(Bundle searchDocumentsUri)
     {
-        return searchDocumentsUri.getQueryParameter(PARAM_QUERY);
+        return null;
+        // return searchDocumentsUri.getQueryParameter(PARAM_QUERY);
     }
 
     private static Bundle invoke(ContentResolver content, Uri uri, String method, Bundle in) throws FileNotFoundException
