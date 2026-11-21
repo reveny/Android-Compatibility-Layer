@@ -408,7 +408,7 @@ public abstract class Context
     public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter, String broadcastPermission,
                                    android.os.Handler scheduler)
     {
-        return registerReceiver(receiver, filter);
+        return runtime.Broadcasts.register(this, receiver, filter);
     }
 
     public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter, String broadcastPermission,
