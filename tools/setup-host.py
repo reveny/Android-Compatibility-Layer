@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from shutil import which
 
 PROJ_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -170,9 +171,77 @@ def phaseArt():
     p = subprocess.run([f"{PROJ_DIR}/tools/build-art-host.sh"])
     if p.returncode != 0:
         exit(p.returncode)
-    p = subprocess.run([f"{PROJ_DIR}/tools/extract-icu-data.sh"])
+    APEX = f"{AOSP_DIR}/prebuilts/runtime/mainline/i18n/apex/com.android.i18n-x86_64.apex"
+    HOST_LIB = f"{AOSP_DIR}/out/host/linux-x86/lib64/libicuuc-host.so"
+    I18N_ROOT = f"{AOSP_DIR}/out/host/linux-x86/com.android.i18n"
+    WORK = f"{PROJ_DIR}/tmp"
+    if " " in AOSP_DIR:
+        print("error: AOSP_DIR contains whitespace; debugfs -R cannot be quoted safely")
+    os.environ['APEX'] = APEX
+    os.environ['HOST_LIB'] = HOST_LIB
+    os.environ['I18N_ROOT'] = I18N_ROOT
+    os.environ['WORK'] = WORK
+    for tool in ["debugfs", "strings", "python3", "od"]:
+        if not which(tool):
+            print(f"error: {tool} not found")
+            exit(1)
+    if not os.path.exists(APEX):
+        print(f"error: apex not found at {APEX}")
+        exit(1)
+    if not os.path.isfile(HOST_LIB):
+        print(f"error: {HOST_LIB} not found - run tools/build-art-host.sh first")
+        exit(1)
+    with zipfile.ZipFile(APEX) as zf, open(f"{WORK}/payload.img", "wb") as f:
+        f.write(zf.read("apex_payload.img"))
+    dat = subprocess.run(
+        ["debugfs", "-R", "ls -l /etc/icu", f"{WORK}/payload.img"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    dat = [i for i in dat.stdout.split('\n') if i.strip().startswith('icudt') and i.strip().endswith(".dat")]
+    if not dat:
+        print(f"error: no icudt*.dat inside {APEX}")
+        exit(1)
+    expected = subprocess.run(
+        ["strings", HOST_LIB],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    expected = [i for i in expected.stdout.split('\n') if 'icudt' in i and i.endswith('.dat')]
+    if not expected:
+        print(f"error: {HOST_LIB} references no ICU data version")
+        exit(1)
+    expectedCount = len(expected)
+    if expectedCount < 1:
+        print(f"error: {HOST_LIB} references {expectedCount} ICU data versions: {expected}")
+        exit(1)
+    print(f"apex provides : {dat}")
+    print(f"host lib wants: {expected}")
+    if not [os.path.basename(i) for i in expected] in dat:
+        print("error: ICU data version mismatch")
+        exit(1)
+    os.makedirs(f"{I18N_ROOT}/etc/icu", exist_ok=True)
+    dest = f"{I18N_ROOT}/etc/icu/{dat}"
+    p = subprocess.run(
+        ["debugfs", "-R", f"dump /etc/icu/{dat} {dest}", f"{WORK}/payload.img"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     if p.returncode != 0:
         exit(p.returncode)
+    if not os.path.getsize(dest):
+        print(f"error: extraction produced an empty {dest}")
+        os.remove(dest)
+        exit(1)
+    magic = b"\x90\x00\xda'\x14\x00\x00\x00\x00\x00\x02\x00CmnD"
+    with open(dest, "rb") as f:
+        if f.read(len(magic)) != magic:
+            print(f"error: {dest} is not ICU common data (missing CmnD magic)")
+            exit(1)
+    print(f"ANDROID_I18N_ROOT={I18N_ROOT}")
 
 
 @say("sdk")
