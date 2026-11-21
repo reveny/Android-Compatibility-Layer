@@ -161,130 +161,146 @@ public final class Activities
         });
     }
 
-    private static void startNow(final Intent intent, final int requestCode)
-    {
-        String otherPackage = targetPackage(intent);
-
-        if (otherPackage != null)
+        private static void startNow(final Intent intent, final int requestCode)
         {
-            if (Packages.launch(otherPackage))
+            String otherPackage = targetPackage(intent);
+
+            if (otherPackage != null)
             {
-                Log.i(TAG, "asked the shell to start " + otherPackage + ", which runs in its own process");
+                if (Packages.launch(otherPackage))
+                {
+                    Log.i(TAG, "asked the shell to start " + otherPackage + ", which runs in its own process");
+                    return;
+                }
+
+                Log.w(TAG, "nothing here can start " + otherPackage + "; it is not installed, or this player has no shell");
                 return;
             }
 
-            Log.w(TAG, "nothing here can start " + otherPackage + "; it is not installed, or this player has no shell");
-            return;
-        }
-
-        Components.Record record = Components.resolve(Components.ACTIVITY, intent);
-        if (record == null)
-        {
-            Log.w(TAG, "no activity answers " + intent + ", so nothing was started");
-            return;
-        }
-
-        Intent launch = new Intent(intent);
-        launch.setComponent(new ComponentName(sPackageName, record.className));
-
-        final int flags = launch.getFlags();
-        final int launchMode = Bootstrap.nativeActivityLaunchMode(record.className);
-
-        if (reusedExisting(record.className, launch, flags, launchMode)) return;
-
-        Entry caller = sStack.isEmpty() ? null : sStack.get(sStack.size() - 1);
-
-        Activity started;
-        try
-        {
-            started = sFactory.instantiateActivity(sLoader, record.className, launch);
-            started.attach(sBaseContext, sApplication);
-            started.setIntent(launch);
-        }
-        catch (Throwable cause)
-        {
-            Log.e(TAG, "could not instantiate activity " + record.className, cause);
-            return;
-        }
-
-        if (caller != null)
-        {
-            caller.requestCode = requestCode;
-            pause(caller);
-
-            if (caller.noHistory)
+            Components.Record record = Components.resolve(Components.ACTIVITY, intent);
+            if (record == null)
             {
-                Log.i(TAG, caller.className + " asked not to be kept, so it leaves the stack as soon as it is left");
-                sStack.remove(caller);
-                stop(caller);
-                destroy(caller);
-                caller = null;
+                Log.w(TAG, "no activity answers " + intent + ", so nothing was started");
+                return;
             }
-        }
 
-        Entry entry = new Entry();
-        entry.activity = started;
-        entry.className = record.className;
-        entry.intent = launch;
-        entry.launchMode = launchMode;
-        entry.noHistory = (flags & Intent.FLAG_ACTIVITY_NO_HISTORY) != 0;
+            Intent launch = new Intent(intent);
+            launch.setComponent(new ComponentName(sPackageName, record.className));
 
-        final boolean newTask = (flags & Intent.FLAG_ACTIVITY_NEW_TASK) != 0 || launchMode == LAUNCH_SINGLE_TASK
-                                || launchMode == LAUNCH_SINGLE_INSTANCE;
+            final int flags = launch.getFlags();
+            final int launchMode = Bootstrap.nativeActivityLaunchMode(record.className);
 
-        if (newTask || caller == null)
-        {
-            sNextTaskId += 1;
-            entry.taskId = sNextTaskId;
-        }
-        else
-        {
-            entry.taskId = caller.taskId;
-        }
+            if (reusedExisting(record.className, launch, flags, launchMode)) return;
 
-        sStack.add(entry);
+            Entry caller = sStack.isEmpty() ? null : sStack.get(sStack.size() - 1);
 
-        Log.i(TAG, "started " + record.className + " in task " + entry.taskId + ", stack is now " + sStack.size() + " deep");
-
-        android.os.Bundle restored = restoreInstanceState(record.className);
-        entry.savedState = restored;
-
-        try
-        {
-            sInstrumentation.callActivityOnCreate(started, restored);
-            sInstrumentation.callActivityOnPostCreate(started, restored);
-            if (restored != null) sInstrumentation.callActivityOnRestoreInstanceState(started, restored);
-            sInstrumentation.callActivityOnStart(started);
-            sInstrumentation.callActivityOnResume(started);
-        }
-        catch (Throwable cause)
-        {
-            Log.e(TAG, "the activity did not start, so the one that launched it stays on screen", cause);
-
-            entry.finishing = true;
-            sStack.remove(entry);
-            destroy(entry);
+            Activity started;
+            try
+            {
+                started = sFactory.instantiateActivity(sLoader, record.className, launch);
+                started.attach(sBaseContext, sApplication);
+                started.setIntent(launch);
+            }
+            catch (Throwable cause)
+            {
+                Log.e(TAG, "could not instantiate activity " + record.className, cause);
+                return;
+            }
 
             if (caller != null)
             {
-                try
+                caller.requestCode = requestCode;
+                pause(caller);
+
+                if (caller.noHistory)
                 {
-                    sInstrumentation.callActivityOnResume(caller.activity);
-                }
-                catch (Throwable resumeFailed)
-                {
-                    Log.e(TAG, "the activity underneath did not come back", resumeFailed);
+                    Log.i(TAG, caller.className + " asked not to be kept, so it leaves the stack as soon as it is left");
+                    sStack.remove(caller);
+                    stop(caller);
+                    destroy(caller);
+                    caller = null;
                 }
             }
 
+            Entry entry = new Entry();
+            entry.activity = started;
+            entry.className = record.className;
+            entry.intent = launch;
+            entry.launchMode = launchMode;
+            entry.noHistory = (flags & Intent.FLAG_ACTIVITY_NO_HISTORY) != 0;
+
+            final boolean newTask = (flags & Intent.FLAG_ACTIVITY_NEW_TASK) != 0 || launchMode == LAUNCH_SINGLE_TASK
+                                    || launchMode == LAUNCH_SINGLE_INSTANCE;
+
+            if (newTask || caller == null)
+            {
+                sNextTaskId += 1;
+                entry.taskId = sNextTaskId;
+            }
+            else
+            {
+                entry.taskId = caller.taskId;
+            }
+
+            sStack.add(entry);
+
+            Log.i(TAG, "started " + record.className + " in task " + entry.taskId + ", stack is now " + sStack.size() + " deep");
+
+            android.os.Bundle restored = restoreInstanceState(record.className);
+            entry.savedState = restored;
+
+            try
+            {
+                sInstrumentation.callActivityOnCreate(started, restored);
+                if (started.isDestroyed() || entry.activity != started)
+                {
+                    if (caller != null) stop(caller);
+                    showTop();
+                    return;
+                }
+
+                sInstrumentation.callActivityOnPostCreate(started, restored);
+                if (restored != null) sInstrumentation.callActivityOnRestoreInstanceState(started, restored);
+
+                sInstrumentation.callActivityOnStart(started);
+                if (started.isDestroyed() || entry.activity != started)
+                {
+                    if (caller != null) stop(caller);
+                    showTop();
+                    return;
+                }
+
+                sInstrumentation.callActivityOnResume(started);
+            }
+            catch (Throwable cause)
+            {
+                Log.e(TAG, "the activity did not start, so the one that launched it stays on screen", cause);
+
+                entry.finishing = true;
+                sStack.remove(entry);
+                destroy(entry);
+
+                if (caller != null)
+                {
+                    try
+                    {
+                        sInstrumentation.callActivityOnResume(caller.activity);
+                    }
+                    catch (Throwable resumeFailed)
+                    {
+                        Log.e(TAG, "the activity underneath did not come back", resumeFailed);
+                    }
+                }
+
+                showTop();
+                return;
+            }
+
+            if (caller != null) stop(caller);
+
             showTop();
-            return;
         }
 
-        if (caller != null) stop(caller);
-
-        showTop();
-    }
 
     private static boolean reusedExisting(String className, Intent launch, int flags, int launchMode)
     {
