@@ -13,8 +13,8 @@ SDK_DIR = f"{TOOLCHAIN_DIR}/android-sdk"
 ENV_FILE = f"{TOOLCHAIN_DIR}/env.sh"
 AOSP_MANIFEST = "https://android.googlesource.com/platform/manifest"
 AOSP_BRANCH = "master-art"
-SDK_PLATFORM = "android-34"
-SDK_BUILD_TOOLS = '34.0.0'
+SDK_PLATFORM = "android-36"
+SDK_BUILD_TOOLS = '36.0.0'
 SDK_TOOLS_URL = 'https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip'
 JOBS = 16
 REQUIRED_BINARIES = ["clang", "clang++", "cmake", "ninja", "javac", "java", "ld.lld", "objdump", "unzip", "curl", "git",
@@ -224,7 +224,7 @@ def report():
     artOk = os.path.exists(f"{AOSP_DIR}/out/host/linux-x86/lib64/libart.so")
     d8Ok = os.path.exists(f"{AOSP_DIR}/out/host/linux-x86/framework/d8.jar")
     icuOk = len([i for i in os.listdir(f"{AOSP_DIR}/out/host/linux-x86/com.android.i18n/etc/icu/") if i.endswith('.dat')]) > 0
-    sdkOk = os.path.exists(f"{SDK_DIR}/platforms/$SDK_PLATFORM/android.jar")
+    sdkOk = os.path.exists(f"{SDK_DIR}/platforms/{SDK_PLATFORM}/android.jar")
     buildToolsOk = os.path.exists(f"{SDK_DIR}/build-tools/{SDK_BUILD_TOOLS}")
     envOk = os.path.exists(ENV_FILE)
     print('  %-22s %s\n' % ("system packages", packagesOk))
