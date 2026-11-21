@@ -407,64 +407,85 @@ public final class Activities
         return true;
     }
 
-    public static void recreate(Activity activity)
-    {
-        Entry entry = entryFor(activity);
-        if (entry == null || entry.className == null) return;
+       private static final java.util.Set<Activity> sRecreating = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>());
 
-        android.os.Bundle state = new android.os.Bundle();
-        sInstrumentation.callActivityOnSaveInstanceState(activity, state);
+       public static void recreate(Activity activity)
+       {
+           if (activity == null || activity.isDestroyed() || !sRecreating.add(activity)) return;
 
-        Object retained = null;
-        try
-        {
-            retained = activity.onRetainNonConfigurationInstance();
-        }
-        catch (Throwable cause)
-        {
-            Log.e(TAG, "the activity threw while retaining its non-configuration instance", cause);
-        }
+           try
+           {
+               Entry entry = entryFor(activity);
+               if (entry == null || entry.className == null) return;
 
-        activity.setChangingConfigurations(true);
-        pause(entry);
-        stop(entry);
-        destroy(entry);
+               android.os.Bundle state = new android.os.Bundle();
+               sInstrumentation.callActivityOnSaveInstanceState(activity, state);
 
-        Activity replacement;
-        try
-        {
-            replacement = sFactory.instantiateActivity(sLoader, entry.className, entry.intent);
-            replacement.attach(sBaseContext, sApplication);
-            replacement.setIntent(entry.intent);
-            replacement.setLastNonConfigurationInstance(retained);
-        }
-        catch (Throwable cause)
-        {
-            Log.e(TAG, "could not build a replacement for " + entry.className, cause);
-            sStack.remove(entry);
-            return;
-        }
+               Object retained = null;
+               try
+               {
+                   retained = activity.onRetainNonConfigurationInstance();
+               }
+               catch (Throwable cause)
+               {
+                   Log.e(TAG, "the activity threw while retaining its non-configuration instance", cause);
+               }
 
-        entry.activity = replacement;
-        entry.savedState = state;
+               activity.setChangingConfigurations(true);
+               pause(entry);
+               stop(entry);
+               destroy(entry);
 
-        Log.i(TAG, "recreated " + entry.className + " with " + state.size() + " saved value(s)");
+               Activity replacement;
+               try
+               {
+                   replacement = sFactory.instantiateActivity(sLoader, entry.className, entry.intent);
+                   replacement.attach(sBaseContext, sApplication);
+                   replacement.setIntent(entry.intent);
+                   replacement.setLastNonConfigurationInstance(retained);
+               }
+               catch (Throwable cause)
+               {
+                   Log.e(TAG, "could not build a replacement for " + entry.className, cause);
+                   sStack.remove(entry);
+                   return;
+               }
 
-        try
-        {
-            sInstrumentation.callActivityOnCreate(replacement, state);
-            sInstrumentation.callActivityOnRestoreInstanceState(replacement, state);
-            sInstrumentation.callActivityOnPostCreate(replacement, state);
-            sInstrumentation.callActivityOnStart(replacement);
-            sInstrumentation.callActivityOnResume(replacement);
-        }
-        catch (Throwable cause)
-        {
-            Log.e(TAG, "the recreated activity did not start", cause);
-        }
+               entry.activity = replacement;
+               entry.savedState = state;
 
-        showTop();
-    }
+               Log.i(TAG, "recreated " + entry.className + " with " + state.size() + " saved value(s)");
+
+               sRecreating.add(replacement);
+               try
+               {
+                   sInstrumentation.callActivityOnCreate(replacement, state);
+                   if (replacement.isDestroyed()) return;
+
+                   sInstrumentation.callActivityOnRestoreInstanceState(replacement, state);
+                   sInstrumentation.callActivityOnPostCreate(replacement, state);
+                   sInstrumentation.callActivityOnStart(replacement);
+                   if (replacement.isDestroyed()) return;
+
+                   sInstrumentation.callActivityOnResume(replacement);
+               }
+               catch (Throwable cause)
+               {
+                   Log.e(TAG, "the recreated activity did not start", cause);
+               }
+               finally
+               {
+                   sRecreating.remove(replacement);
+               }
+
+               showTop();
+           }
+           finally
+           {
+               sRecreating.remove(activity);
+           }
+       }
+
 
     public static void recreateAll()
     {

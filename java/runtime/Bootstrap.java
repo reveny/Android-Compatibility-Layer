@@ -357,11 +357,15 @@ public final class Bootstrap
                                + " while it was being created, so it stays behind it until that one finishes");
             }
             else
-            {
-                instrumentation.callActivityOnStart(activity);
-                instrumentation.callActivityOnResume(activity);
-                if (activity instanceof android.app.NativeActivity) ((android.app.NativeActivity)activity).attachWindow(width, height);
-            }
+                        {
+                            instrumentation.callActivityOnStart(activity);
+                            if (!activity.isDestroyed())
+                            {
+                                instrumentation.callActivityOnResume(activity);
+                            }
+                            if (activity instanceof android.app.NativeActivity) ((android.app.NativeActivity)activity).attachWindow(width, height);
+                        }
+
         }
         catch (Throwable cause)
         {
