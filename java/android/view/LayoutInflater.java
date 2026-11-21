@@ -254,9 +254,29 @@ public abstract class LayoutInflater
 
             if ("fragment".equals(name))
             {
+                AttributeSet attributes = asAttributeSet(parser);
+                View view = null;
+
+                if (mFactory2 != null) view = mFactory2.onCreateView(group, name, context, attributes);
+                else if (mFactory != null) view = mFactory.onCreateView(name, context, attributes);
+
+                if (view == null && mPrivateFactory != null)
+                {
+                    view = mPrivateFactory.onCreateView(group, name, context, attributes);
+                }
+
+                if (view != null)
+                {
+                    ViewGroup.LayoutParams params = group.generateLayoutParams(attributes);
+                    group.addView(view, params);
+                    skipTag(parser);
+                    continue;
+                }
+
                 inflateFragment(parser, group);
                 continue;
             }
+
 
             AttributeSet attributes = asAttributeSet(parser);
             View child = createViewFromTag(group, name, context, attributes, false);
@@ -291,50 +311,101 @@ public abstract class LayoutInflater
         skipTag(parser);
     }
 
-    private void inflateFragment(XmlPullParser parser, ViewGroup parent)
-    {
-        AttributeSet attributes = asAttributeSet(parser);
+       private void inflateFragment(XmlPullParser parser, ViewGroup parent)
+       {
+           AttributeSet attributes = asAttributeSet(parser);
 
-        String className = attributes.getAttributeValue(ANDROID_NAMESPACE, "name");
-        if (className == null) className = attributes.getAttributeValue(null, "class");
+           String className = attributes.getAttributeValue(ANDROID_NAMESPACE, "name");
+           if (className == null) className = attributes.getAttributeValue(null, "class");
 
-        if (className == null)
-        {
-            throw new InflateException(parser.getPositionDescription() + ": <fragment> needs a name or class");
-        }
+           if (className == null)
+           {
+               throw new InflateException(parser.getPositionDescription() + ": <fragment> needs a name or class");
+           }
 
-        int id = attributes.getAttributeResourceValue(ANDROID_NAMESPACE, "id", View.NO_ID);
-        String tag = attributes.getAttributeValue(ANDROID_NAMESPACE, "tag");
+           int id = attributes.getAttributeResourceValue(ANDROID_NAMESPACE, "id", View.NO_ID);
+           String tag = attributes.getAttributeValue(ANDROID_NAMESPACE, "tag");
 
-        android.app.Fragment fragment = android.app.Fragment.instantiate(mContext, className);
+           Class<?> clazz;
+           try
+           {
+               clazz = mContext.getClassLoader().loadClass(className);
+           }
+           catch (ClassNotFoundException e)
+           {
+               throw new InflateException(parser.getPositionDescription() + ": Unable to find fragment class " + className, e);
+           }
 
-        fragment.setId(id);
-        fragment.setTag(tag);
-        fragment.attachTo(activityOf(mContext), mContext);
-        fragment.onAttach(mContext);
-        fragment.onCreate(null);
+           if (android.app.Fragment.class.isAssignableFrom(clazz))
+           {
+               android.app.Fragment fragment = android.app.Fragment.instantiate(mContext, className);
 
-        View created = fragment.onCreateView(this, parent, null);
+               fragment.setId(id);
+               fragment.setTag(tag);
+               fragment.attachTo(activityOf(mContext), mContext);
+               fragment.onAttach(mContext);
+               fragment.onCreate(null);
 
-        if (created == null) created = new View(mContext);
+               View created = fragment.onCreateView(this, parent, null);
 
-        if (id != View.NO_ID && created.getId() == View.NO_ID) created.setId(id);
+               if (created == null) created = new View(mContext);
 
-        fragment.setView(created);
+               if (id != View.NO_ID && created.getId() == View.NO_ID) created.setId(id);
 
-        ViewGroup.LayoutParams params = parent.generateLayoutParams(attributes);
-        parent.addView(created, params);
+               fragment.setView(created);
 
-        fragment.onViewCreated(created, null);
-        fragment.onActivityCreated(null);
+               ViewGroup.LayoutParams params = parent.generateLayoutParams(attributes);
+               parent.addView(created, params);
 
-        skipTag(parser);
+               fragment.onViewCreated(created, null);
+               fragment.onActivityCreated(null);
 
-        if (TRACE_INFLATE)
-        {
-            android.util.Log.i("LayoutInflater", "inflated fragment " + className + " id=0x" + Integer.toHexString(id));
-        }
-    }
+               skipTag(parser);
+
+               if (TRACE_INFLATE)
+               {
+                   android.util.Log.i("LayoutInflater", "inflated fragment " + className + " id=0x" + Integer.toHexString(id));
+               }
+               return;
+           }
+
+           try
+           {
+               Object activity = activityOf(mContext);
+               Object fm = activity.getClass().getMethod("getSupportFragmentManager").invoke(activity);
+
+               android.widget.FrameLayout container = new android.widget.FrameLayout(mContext);
+               int containerId = (id != View.NO_ID) ? id : View.generateViewId();
+               container.setId(containerId);
+
+               ViewGroup.LayoutParams params = parent.generateLayoutParams(attributes);
+               parent.addView(container, params);
+
+               Object fragment = clazz.getConstructor().newInstance();
+
+               Object tx = fm.getClass().getMethod("beginTransaction").invoke(fm);
+               Class<?> fragBaseClass = clazz;
+               while (fragBaseClass != null && !fragBaseClass.getName().endsWith(".Fragment"))
+               {
+                   fragBaseClass = fragBaseClass.getSuperclass();
+               }
+               tx.getClass().getMethod("add", int.class, fragBaseClass, String.class)
+                 .invoke(tx, containerId, fragment, tag);
+               tx.getClass().getMethod("commitNowAllowingStateLoss").invoke(tx);
+
+               skipTag(parser);
+
+               if (TRACE_INFLATE)
+               {
+                   android.util.Log.i("LayoutInflater", "inflated support/androidx fragment " + className + " id=0x" + Integer.toHexString(containerId));
+               }
+           }
+           catch (Exception e)
+           {
+               throw new InflateException(parser.getPositionDescription() + ": Error inflating AndroidX fragment " + className, e);
+           }
+       }
+
 
     private static android.app.Activity activityOf(Context context)
     {
