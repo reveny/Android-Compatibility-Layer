@@ -211,12 +211,14 @@ def phaseArt():
         print(f"error: {HOST_LIB} references no ICU data version")
         exit(1)
     expectedCount = len(expected)
-    if expectedCount < 1:
+    if expectedCount != 1:
         print(f"error: {HOST_LIB} references {expectedCount} ICU data versions: {expected}")
         exit(1)
+    expected = os.path.basename(expected[0])
+    dat = dat[0]
     print(f"apex provides : {dat}")
     print(f"host lib wants: {expected}")
-    if not [os.path.basename(i) for i in expected] in dat:
+    if not expected == dat:
         print("error: ICU data version mismatch")
         exit(1)
     os.makedirs(f"{I18N_ROOT}/etc/icu", exist_ok=True)
