@@ -26,7 +26,7 @@ if(EXTRA_CLASSPATH)
 endif()
 
 execute_process(
-    COMMAND ${JAVAC} --release 21 -nowarn ${JAVAC_CLASSPATH_ARGS} -d "${CLASSES_DIR}" "@${SOURCE_FILE}"
+    COMMAND ${JAVAC} --release 19 -nowarn ${JAVAC_CLASSPATH_ARGS} -d "${CLASSES_DIR}" "@${SOURCE_FILE}"
     RESULT_VARIABLE JAVAC_STATUS
 )
 if(NOT JAVAC_STATUS EQUAL 0)

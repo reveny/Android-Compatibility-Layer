@@ -183,7 +183,9 @@ public abstract class Context
         SERVICE_NAMES_BY_CLASS.put("android.os.PowerWhitelistManager", POWER_WHITELIST_MANAGER);
         SERVICE_NAMES_BY_CLASS.put("android.os.PowerExemptionManager", POWER_EXEMPTION_SERVICE);
     }
-
+    public int getThemeResId() {
+        return 0;
+    }
     public abstract Resources.Theme getTheme();
 
     public abstract void setTheme(int resourceId);
