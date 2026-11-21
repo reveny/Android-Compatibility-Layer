@@ -139,7 +139,7 @@ def phaseAosp():
         text=True,
         check=True,
     )
-    projects = [i for i in projects.stdout.split('\n') if i.startswith('<project')]
+    projects = [i for i in projects.stdout.split('\n') if i.strip().startswith('<project')]
     print(f"manifest resolves to {len(projects)} projects")
     if len(projects) >= 400:
         print("that is far more than the reduced art manifest - check ACL_AOSP_BRANCH")
