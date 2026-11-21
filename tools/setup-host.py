@@ -263,7 +263,7 @@ def main():
         if argument == '--check':
             checkOnly = True
         if argument in ['--help', '-h']:
-            print("setup-host.sh [--check] [phase ...]")
+            print("setup-host.py [--check] [phase ...]")
             print("  phases: packages aosp art sdk env")
             print("  everything lands in .toolchain/ rather than spread over the home directory")
             exit(0)
