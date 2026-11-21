@@ -8,7 +8,9 @@
 #include <cstring>
 #include <fcntl.h>
 #include <sched.h>
+#include <csignal>
 #include <sys/mount.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/syscall.h>
@@ -485,6 +487,13 @@ Sandbox::Result Sandbox::Isolate(const Isolation& isolation, IsolationReport& re
 
     if (isolation.separateProcessTable)
     {
+        int lifeline[2];
+        if (pipe2(lifeline, O_CLOEXEC) != 0)
+        {
+            fprintf(stderr, "[sandbox] cannot tie the sandbox to the launcher: %s\n", strerror(errno));
+            return Result::NamespaceFailed;
+        }
+
         pid_t player = fork();
         if (player < 0)
         {
@@ -492,8 +501,22 @@ Sandbox::Result Sandbox::Isolate(const Isolation& isolation, IsolationReport& re
             return Result::NamespaceFailed;
         }
 
+        if (player == 0)
+        {
+            close(lifeline[1]);
+            prctl(PR_SET_PDEATHSIG, SIGKILL);
+
+            char ignored = 0;
+            fcntl(lifeline[0], F_SETFL, O_NONBLOCK);
+            if (read(lifeline[0], &ignored, 1) == 0) _exit(1);
+
+            close(lifeline[0]);
+        }
+
         if (player != 0)
         {
+            close(lifeline[0]);
+
             int state = 0;
             while (waitpid(player, &state, 0) < 0 && errno == EINTR) continue;
 

@@ -42,6 +42,7 @@ namespace JniBridge
         uint64_t guestLibrariesLoaded = 0;
         uint64_t guestJniOnLoadCalls = 0;
         uint64_t lastJniOnLoadVersion = 0;
+        std::string latestGuestLibrary;
     };
 
     struct Instance

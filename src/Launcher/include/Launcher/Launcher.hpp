@@ -46,6 +46,9 @@ namespace Launcher
     inline constexpr const char* WINDOW_HEIGHT_SETTING = Platform::WINDOW_HEIGHT_SETTING;
     inline constexpr int PORTRAIT_WINDOW_WIDTH = 1080;
     inline constexpr int PORTRAIT_WINDOW_HEIGHT = 2400;
+    inline constexpr const char* RENDER_DEVICE_DIRECTORY = "/dev/dri";
+    inline constexpr const char* RENDER_NODE_PREFIX = "renderD";
+    inline constexpr const char* AUDIO_SOCKETS[] = {"pipewire-0", "pipewire-0-manager"};
 
     enum class Result : uint8_t
     {
@@ -82,6 +85,7 @@ namespace Launcher
         bool presentWithoutWaiting = false;
         bool reportFrameRate = false;
         bool decorated = false;
+        bool undecorated = false;
         bool fullscreen = false;
         bool network = false;
         bool translateOnly = false;

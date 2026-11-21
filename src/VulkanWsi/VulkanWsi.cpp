@@ -11,6 +11,7 @@
 #include <vulkan/vulkan.h>
 
 #include "AbiBridge/AbiBridge.hpp"
+#include "HostedSwapchain.hpp"
 #include "Overlay/FrameRate.hpp"
 #include "Overlay/OverlayVulkan.hpp"
 #include "Platform/DeviceIdentity.hpp"
@@ -46,6 +47,11 @@ static PFN_vkQueuePresentKHR gHostQueuePresent = nullptr;
 static PFN_vkCreateDevice gHostCreateDevice = nullptr;
 static PFN_vkGetDeviceQueue gHostGetDeviceQueue = nullptr;
 static PFN_vkDestroySwapchainKHR gHostDestroySwapchain = nullptr;
+static PFN_vkGetPhysicalDeviceSurfaceSupportKHR gHostSurfaceSupport = nullptr;
+static PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR gHostSurfaceCapabilities = nullptr;
+static PFN_vkGetPhysicalDeviceSurfacePresentModesKHR gHostPresentModes = nullptr;
+static PFN_vkGetSwapchainImagesKHR gHostGetSwapchainImages = nullptr;
+static PFN_vkAcquireNextImageKHR gHostAcquireNextImage = nullptr;
 
 static uint64_t gFrameWindowStart = 0;
 static uint64_t gFrameWindowCount = 0;
@@ -334,6 +340,7 @@ static VkResult CreateInstanceForGuest(const VkInstanceCreateInfo* createInfo, c
 
     std::vector<const char*> extensions;
     bool rewrote = false;
+    bool hosted = HostedSwapchain::IsActive();
 
     for (uint32_t index = 0; index < createInfo->enabledExtensionCount; ++index)
     {
@@ -341,7 +348,7 @@ static VkResult CreateInstanceForGuest(const VkInstanceCreateInfo* createInfo, c
 
         if (requested && strcmp(requested, VulkanWsi::GUEST_SURFACE_EXTENSION) == 0)
         {
-            extensions.push_back(VulkanWsi::HOST_SURFACE_EXTENSION);
+            if (!hosted) extensions.push_back(VulkanWsi::HOST_SURFACE_EXTENSION);
             rewrote = true;
             continue;
         }
@@ -353,21 +360,110 @@ static VkResult CreateInstanceForGuest(const VkInstanceCreateInfo* createInfo, c
     {
         std::lock_guard<std::mutex> guard(gStatisticsMutex);
         gStatistics.surfaceExtensionsRewritten += 1;
-        fprintf(stderr, "[vulkanwsi] the guest asked for %s; the host is being asked for %s instead\n",
-                VulkanWsi::GUEST_SURFACE_EXTENSION, VulkanWsi::HOST_SURFACE_EXTENSION);
+
+        if (hosted)
+        {
+            fprintf(stderr, "[vulkanwsi] the guest asked for %s; its surfaces are provided by the window host instead\n",
+                    VulkanWsi::GUEST_SURFACE_EXTENSION);
+        }
+        else
+        {
+            fprintf(stderr, "[vulkanwsi] the guest asked for %s; the host is being asked for %s instead\n",
+                    VulkanWsi::GUEST_SURFACE_EXTENSION, VulkanWsi::HOST_SURFACE_EXTENSION);
+        }
     }
 
     VkInstanceCreateInfo rewritten = *createInfo;
     rewritten.enabledExtensionCount = (uint32_t)extensions.size();
     rewritten.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
 
-    return gHostCreateInstance(&rewritten, nullptr, instance);
+    VkApplicationInfo application{};
+    application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    if (createInfo->pApplicationInfo) application = *createInfo->pApplicationInfo;
+
+    if (hosted && application.apiVersion < VK_API_VERSION_1_1)
+    {
+        application.apiVersion = VK_API_VERSION_1_1;
+        rewritten.pApplicationInfo = &application;
+    }
+
+    VkResult created = gHostCreateInstance(&rewritten, nullptr, instance);
+
+    if (created == VK_SUCCESS && instance)
+    {
+        gHostInstance = *instance;
+        HostedSwapchain::NoteInstance(*instance);
+    }
+
+    return created;
+}
+
+template <typename Function> static bool ResolveInstanceFunction(const char* name, Function& function)
+{
+    if (!function && gHostGetInstanceProcAddr && gHostInstance != VK_NULL_HANDLE)
+        function = reinterpret_cast<Function>(gHostGetInstanceProcAddr(gHostInstance, name));
+
+    return function != nullptr;
+}
+
+static VkResult SurfaceSupportForGuest(VkPhysicalDevice physicalDevice, uint32_t family, VkSurfaceKHR surface, VkBool32* supported)
+{
+    CountForwardedCall();
+
+    if (HostedSwapchain::OwnsSurface(surface)) return HostedSwapchain::SurfaceSupport(supported);
+    if (!ResolveInstanceFunction("vkGetPhysicalDeviceSurfaceSupportKHR", gHostSurfaceSupport))
+        return VK_ERROR_INITIALIZATION_FAILED;
+
+    return gHostSurfaceSupport(physicalDevice, family, surface, supported);
+}
+
+static VkResult SurfaceCapabilitiesForGuest(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR* capabilities)
+{
+    CountForwardedCall();
+
+    if (HostedSwapchain::OwnsSurface(surface)) return HostedSwapchain::SurfaceCapabilities(capabilities);
+    if (!ResolveInstanceFunction("vkGetPhysicalDeviceSurfaceCapabilitiesKHR", gHostSurfaceCapabilities))
+        return VK_ERROR_INITIALIZATION_FAILED;
+
+    return gHostSurfaceCapabilities(physicalDevice, surface, capabilities);
+}
+
+static VkResult PresentModesForGuest(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* count, VkPresentModeKHR* modes)
+{
+    CountForwardedCall();
+
+    if (HostedSwapchain::OwnsSurface(surface)) return HostedSwapchain::PresentModes(count, modes);
+    if (!ResolveInstanceFunction("vkGetPhysicalDeviceSurfacePresentModesKHR", gHostPresentModes))
+        return VK_ERROR_INITIALIZATION_FAILED;
+
+    return gHostPresentModes(physicalDevice, surface, count, modes);
+}
+
+static VkResult SwapchainImagesForGuest(VkDevice device, VkSwapchainKHR swapchain, uint32_t* count, VkImage* images)
+{
+    CountForwardedCall();
+
+    if (HostedSwapchain::OwnsSwapchain(swapchain)) return HostedSwapchain::GetImages(swapchain, count, images);
+
+    return gHostGetSwapchainImages(device, swapchain, count, images);
+}
+
+static VkResult AcquireNextImageForGuest(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence,
+                                         uint32_t* index)
+{
+    CountForwardedCall();
+
+    if (HostedSwapchain::OwnsSwapchain(swapchain)) return HostedSwapchain::Acquire(device, swapchain, timeout, semaphore, fence, index);
+
+    return gHostAcquireNextImage(device, swapchain, timeout, semaphore, fence, index);
 }
 
 static VkResult SurfaceFormatsForGuest(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t* count,
                                        VkSurfaceFormatKHR* formats)
 {
     CountForwardedCall();
+
+    if (HostedSwapchain::OwnsSurface(surface)) return HostedSwapchain::SurfaceFormats(count, formats);
 
     if (!gHostGetSurfaceFormats && gHostGetInstanceProcAddr && gHostInstance != VK_NULL_HANDLE)
     {
@@ -400,6 +496,8 @@ static VkResult CreateSwapchainForGuest(VkDevice device, const VkSwapchainCreate
     CountForwardedCall();
 
     if (!createInfo || !swapchain) return VK_ERROR_INITIALIZATION_FAILED;
+
+    if (HostedSwapchain::OwnsSurface(createInfo->surface)) return HostedSwapchain::CreateSwapchain(device, createInfo, swapchain);
 
     if (!gHostCreateSwapchain && gHostGetDeviceProcAddr)
         gHostCreateSwapchain = (PFN_vkCreateSwapchainKHR)gHostGetDeviceProcAddr(device, "vkCreateSwapchainKHR");
@@ -475,6 +573,21 @@ static VkResult CreateSurfaceForGuest(VkInstance instance, const GuestAndroidSur
 
     if (!createInfo || !surface) return VK_ERROR_INITIALIZATION_FAILED;
 
+    if (HostedSwapchain::IsActive())
+    {
+        gHostInstance = instance;
+        HostedSwapchain::NoteInstance(instance);
+
+        VkResult created = HostedSwapchain::CreateSurface(surface);
+        if (created == VK_SUCCESS)
+        {
+            std::lock_guard<std::mutex> guard(gStatisticsMutex);
+            gStatistics.surfacesCreated += 1;
+        }
+
+        return created;
+    }
+
     if (!gDisplay || !gSurface)
     {
         fprintf(stderr, "[vulkanwsi] the guest asked for a window surface but no compositor surface is attached\n");
@@ -534,6 +647,12 @@ static void DestroySurfaceForGuest(VkInstance instance, VkSurfaceKHR surface, co
 
     if (surface == VK_NULL_HANDLE) return;
 
+    if (HostedSwapchain::OwnsSurface(surface))
+    {
+        HostedSwapchain::DestroySurface(surface);
+        return;
+    }
+
     if (surface == gSharedSurface)
     {
         if (gSharedSurfaceHolders > 0) gSharedSurfaceHolders -= 1;
@@ -561,9 +680,31 @@ static VkResult CreateDeviceForGuest(VkPhysicalDevice physicalDevice, const VkDe
 {
     CountForwardedCall();
 
-    VkResult created = gHostCreateDevice(physicalDevice, createInfo, nullptr, device);
+    if (!createInfo || !device) return VK_ERROR_INITIALIZATION_FAILED;
 
-    if (created == VK_SUCCESS && device) OverlayVulkan::NoteDevice(physicalDevice, *device);
+    std::vector<const char*> requested(createInfo->ppEnabledExtensionNames,
+                                       createInfo->ppEnabledExtensionNames + createInfo->enabledExtensionCount);
+    std::vector<const char*> extensions = requested;
+
+    if (HostedSwapchain::IsActive()) HostedSwapchain::AddDeviceExtensions(physicalDevice, extensions);
+
+    VkDeviceCreateInfo rewritten = *createInfo;
+    rewritten.enabledExtensionCount = (uint32_t)extensions.size();
+    rewritten.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
+
+    VkResult created = gHostCreateDevice(physicalDevice, &rewritten, nullptr, device);
+
+    if (created != VK_SUCCESS && extensions.size() != requested.size())
+    {
+        fprintf(stderr, "[vulkanwsi] the device refused the extensions for sharing images with the window host, so frames will be copied\n");
+        extensions = requested;
+        created = gHostCreateDevice(physicalDevice, createInfo, nullptr, device);
+    }
+
+    if (created != VK_SUCCESS) return created;
+
+    OverlayVulkan::NoteDevice(physicalDevice, *device);
+    if (HostedSwapchain::IsActive()) HostedSwapchain::NoteDevice(physicalDevice, *device, extensions);
 
     return created;
 }
@@ -574,20 +715,61 @@ static void GetDeviceQueueForGuest(VkDevice device, uint32_t queueFamilyIndex, u
 
     gHostGetDeviceQueue(device, queueFamilyIndex, queueIndex, queue);
 
-    if (queue) OverlayVulkan::NoteQueue(device, queueFamilyIndex, *queue);
+    if (!queue) return;
+
+    OverlayVulkan::NoteQueue(device, queueFamilyIndex, *queue);
+    HostedSwapchain::NoteQueue(device, queueFamilyIndex, *queue);
 }
 
 static void DestroySwapchainForGuest(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks*)
 {
     CountForwardedCall();
 
+    if (HostedSwapchain::OwnsSwapchain(swapchain))
+    {
+        HostedSwapchain::DestroySwapchain(device, swapchain);
+        return;
+    }
+
     OverlayVulkan::ForgetSwapchain(swapchain);
     gHostDestroySwapchain(device, swapchain, nullptr);
+}
+
+static VkResult PresentToHost(VkQueue queue, const VkPresentInfoKHR* presentInfo)
+{
+    VkResult overall = VK_SUCCESS;
+
+    for (uint32_t index = 0; index < presentInfo->swapchainCount; ++index)
+    {
+        const VkSemaphore* waits = index == 0 ? presentInfo->pWaitSemaphores : nullptr;
+        uint32_t waitCount = index == 0 ? presentInfo->waitSemaphoreCount : 0;
+
+        VkResult presented = HostedSwapchain::Present(queue, presentInfo->pSwapchains[index], presentInfo->pImageIndices[index], waits, waitCount);
+
+        if (presentInfo->pResults) presentInfo->pResults[index] = presented;
+        if (presented < 0 || overall == VK_SUCCESS) overall = presented;
+    }
+
+    return overall;
 }
 
 static VkResult QueuePresentForGuest(VkQueue queue, const VkPresentInfoKHR* presentInfo)
 {
     FrameRate::Tick();
+
+    if (presentInfo && presentInfo->swapchainCount > 0 && HostedSwapchain::OwnsSwapchain(presentInfo->pSwapchains[0]))
+    {
+        VkResult presented = PresentToHost(queue, presentInfo);
+
+        if (presented == VK_SUCCESS || presented == VK_SUBOPTIMAL_KHR)
+        {
+            std::lock_guard<std::mutex> guard(gStatisticsMutex);
+            gStatistics.framesPresented += presentInfo->swapchainCount;
+            if (gPresentTimestamps.size() < VulkanWsi::MAX_PACING_SAMPLES) gPresentTimestamps.push_back(MonotonicNanos());
+        }
+
+        return presented;
+    }
 
     VkPresentInfoKHR rewrittenPresent = {};
     VkSemaphore overlaySemaphore = VK_NULL_HANDLE;
@@ -654,6 +836,16 @@ VulkanWsi::Result VulkanWsi::RegisterAll(GuestRuntime::Instance& runtime)
         return Result::MissingEntryPoint;
     }
 
+    HostedSwapchain::Initialize(gHostGetInstanceProcAddr, gHostGetDeviceProcAddr);
+    gHostGetSwapchainImages = (PFN_vkGetSwapchainImagesKHR)dlsym(gDriver, "vkGetSwapchainImagesKHR");
+    gHostAcquireNextImage = (PFN_vkAcquireNextImageKHR)dlsym(gDriver, "vkAcquireNextImageKHR");
+
+    if (!gHostGetSwapchainImages || !gHostAcquireNextImage)
+    {
+        fprintf(stderr, "[vulkanwsi] the host driver does not expose vkGetSwapchainImagesKHR or vkAcquireNextImageKHR\n");
+        return Result::MissingEntryPoint;
+    }
+
     AbiBridge::Registry& registry = GuestRuntime::BridgeRegistry(runtime);
     gRegistry = &registry;
 
@@ -671,7 +863,12 @@ VulkanWsi::Result VulkanWsi::RegisterAll(GuestRuntime::Instance& runtime)
         !RegisterForwardedEntryPoint(registry, "vkCreateAndroidSurfaceKHR", (void*)&CreateSurfaceForGuest, 4, true) ||
         !RegisterForwardedEntryPoint(registry, "vkCreateSwapchainKHR", (void*)&CreateSwapchainForGuest, 4, true) ||
         !RegisterForwardedEntryPoint(registry, "vkGetPhysicalDeviceSurfaceFormatsKHR", (void*)&SurfaceFormatsForGuest, 4, true) ||
-        !RegisterForwardedEntryPoint(registry, "vkDestroySurfaceKHR", (void*)&DestroySurfaceForGuest, 3, false))
+        !RegisterForwardedEntryPoint(registry, "vkDestroySurfaceKHR", (void*)&DestroySurfaceForGuest, 3, false) ||
+        !RegisterForwardedEntryPoint(registry, "vkGetPhysicalDeviceSurfaceSupportKHR", (void*)&SurfaceSupportForGuest, 4, true) ||
+        !RegisterForwardedEntryPoint(registry, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR", (void*)&SurfaceCapabilitiesForGuest, 3, true) ||
+        !RegisterForwardedEntryPoint(registry, "vkGetPhysicalDeviceSurfacePresentModesKHR", (void*)&PresentModesForGuest, 4, true) ||
+        !RegisterForwardedEntryPoint(registry, "vkGetSwapchainImagesKHR", (void*)&SwapchainImagesForGuest, 4, true) ||
+        !RegisterForwardedEntryPoint(registry, "vkAcquireNextImageKHR", (void*)&AcquireNextImageForGuest, 6, true))
     {
         return Result::RegistrationFailed;
     }
@@ -804,9 +1001,26 @@ void VulkanWsi::AttachSurfaceTarget(wl_display* display, wl_surface* surface)
     gSurface = surface;
 }
 
+void VulkanWsi::AttachHostedTarget(HostedWindow::Session* session, uint32_t width, uint32_t height)
+{
+    HostedSwapchain::Attach(session, width, height);
+}
+
 bool VulkanWsi::HasSurfaceTarget()
 {
-    return gDisplay != nullptr && gSurface != nullptr;
+    return (gDisplay != nullptr && gSurface != nullptr) || HostedSwapchain::IsActive();
+}
+
+VulkanWsi::HostedStatistics VulkanWsi::GetHostedStatistics()
+{
+    HostedSwapchain::Statistics counters = HostedSwapchain::GetStatistics();
+
+    HostedStatistics statistics;
+    statistics.framesShared = counters.framesShared;
+    statistics.framesCopied = counters.framesCopied;
+    statistics.swapchainsCreated = counters.swapchainsCreated;
+
+    return statistics;
 }
 
 VulkanWsi::Result VulkanWsi::WritePacingReport(const std::string& path)

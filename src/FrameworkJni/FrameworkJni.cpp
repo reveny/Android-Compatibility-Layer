@@ -859,8 +859,12 @@ static jlong WindowOpen(JNIEnv* env, jclass, jint width, jint height, jstring ti
 {
     if (gWindowSession.open) return reinterpret_cast<jlong>(&gWindowSession);
 
-    std::string titleText = CopyJavaString(env, title);
-    WindowBridge::Result result = WindowBridge::Open(static_cast<uint32_t>(width), static_cast<uint32_t>(height), titleText.c_str(), gWindowSession);
+    std::string packageName = CopyJavaString(env, title);
+    const char* label = Settings::Lookup(WaylandClient::TITLE_SETTING);
+    const char* titleText = label && label[0] != '\0' ? label : packageName.c_str();
+
+    WindowBridge::Result result =
+        WindowBridge::Open(static_cast<uint32_t>(width), static_cast<uint32_t>(height), titleText, packageName.c_str(), gWindowSession);
 
     if (result != WindowBridge::Result::Ok)
     {
@@ -956,7 +960,7 @@ static jboolean WindowNextInputEvent(JNIEnv* env, jclass, jlong handle, jlongArr
 static jlong WindowLastFrameTimeNanos(JNIEnv*, jclass, jlong handle)
 {
     WindowBridge::Session* session = SessionFrom(handle);
-    return session ? static_cast<jlong>(session->lastFrameTimeNanos) : 0;
+    return session ? static_cast<jlong>(WindowBridge::LastFrameTimeNanos(*session)) : 0;
 }
 
 static jboolean WindowIsCloseRequested(JNIEnv*, jclass, jlong handle)
@@ -1003,9 +1007,25 @@ static jboolean WindowDisplayMode(JNIEnv* env, jclass, jlong handle, jintArray m
     WindowBridge::Session* session = SessionFrom(handle);
     if (!session || !modeOut) return JNI_FALSE;
     if (env->GetArrayLength(modeOut) < 6) return JNI_FALSE;
-    if (session->isHosted) return JNI_FALSE;
 
-    WaylandClient::DisplayMode mode = WaylandClient::CurrentDisplayMode(session->connection);
+    WaylandClient::DisplayMode mode{};
+
+    if (session->isHosted)
+    {
+        HostedWindow::Display display = HostedWindow::CurrentDisplay(session->hosted);
+        mode.width = display.width;
+        mode.height = display.height;
+        mode.refreshMilliHertz = display.refreshMilliHertz;
+        mode.scale = display.scale;
+        mode.physicalWidthMm = display.physicalWidthMm;
+        mode.physicalHeightMm = display.physicalHeightMm;
+        mode.described = display.described && display.width > 0;
+    }
+    else
+    {
+        mode = WaylandClient::CurrentDisplayMode(session->connection);
+    }
+
     if (!mode.described) return JNI_FALSE;
 
     jint values[6] = {(jint)mode.width,           (jint)mode.height,          (jint)mode.refreshMilliHertz,

@@ -4,6 +4,7 @@
 #include <string>
 
 #include "GuestRuntime/GuestRuntime.hpp"
+#include "HostedWindow/HostedWindow.hpp"
 
 struct wl_display;
 struct wl_surface;
@@ -40,13 +41,22 @@ namespace VulkanWsi
         uint64_t framesPresented = 0;
     };
 
+    struct HostedStatistics
+    {
+        uint64_t framesShared = 0;
+        uint64_t framesCopied = 0;
+        uint64_t swapchainsCreated = 0;
+    };
+
     Result RegisterAll(GuestRuntime::Instance& runtime);
     void Shutdown();
 
     void AttachSurfaceTarget(wl_display* display, wl_surface* surface);
+    void AttachHostedTarget(HostedWindow::Session* session, uint32_t width, uint32_t height);
     bool HasSurfaceTarget();
 
     Statistics GetStatistics();
+    HostedStatistics GetHostedStatistics();
     Result WritePacingReport(const std::string& path);
 
     const char* ResultName(Result result);

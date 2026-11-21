@@ -5,11 +5,19 @@
 namespace ControlChannel
 {
     inline constexpr const char* DESCRIPTOR_SETTING = "control-fd";
-    inline constexpr uint32_t PROTOCOL_VERSION = 1;
+    inline constexpr uint32_t PROTOCOL_VERSION = 2;
     inline constexpr int INVALID_FILE_DESCRIPTOR = -1;
     inline constexpr uint32_t FRAME_BUFFER_COUNT = 3;
     inline constexpr uint32_t MAX_FRAME_BUFFERS = 8;
+    inline constexpr uint32_t MAX_PLANES = 4;
     inline constexpr uint32_t MAX_DESCRIPTORS = MAX_FRAME_BUFFERS;
+    inline constexpr uint32_t MAX_FORMAT_ENTRIES = 4096;
+    inline constexpr uint32_t FORMAT_ARGB8888 = 0x34325241;
+    inline constexpr uint32_t FORMAT_XRGB8888 = 0x34325258;
+    inline constexpr uint32_t FORMAT_ABGR8888 = 0x34324241;
+    inline constexpr uint32_t FORMAT_XBGR8888 = 0x34324258;
+    inline constexpr uint64_t MODIFIER_LINEAR = 0;
+    inline constexpr uint64_t MODIFIER_INVALID = 0x00ffffffffffffffull;
     inline constexpr uint32_t MAX_NAME_BYTES = 256;
     inline constexpr uint32_t MAX_TEXT_BYTES = 512;
     inline constexpr uint32_t MAX_TAG_BYTES = 64;
@@ -34,12 +42,18 @@ namespace ControlChannel
     {
         Invalid = 0,
         Hello,
-        Buffers,
+        Display,
+        Configure,
+        RegisterBuffer,
+        ForgetBuffers,
         FrameReady,
         BufferReleased,
+        RequestFrame,
         PresentDone,
         Input,
         Stop,
+        SetTitle,
+        SetFullscreen,
         Progress,
         Statistics,
         Log,
@@ -54,32 +68,91 @@ namespace ControlChannel
         Key
     };
 
+    enum class BufferKind : uint8_t
+    {
+        Shared,
+        Dmabuf
+    };
+
     struct HelloPayload
     {
         uint32_t version;
         uint32_t width;
         uint32_t height;
+        char title[MAX_NAME_BYTES];
         char packageName[MAX_NAME_BYTES];
     };
 
-    struct BuffersPayload
+    struct DisplayPayload
     {
-        uint32_t count;
         uint32_t width;
         uint32_t height;
-        uint32_t stride;
+        uint32_t refreshMilliHertz;
+        uint32_t scale;
+        int32_t physicalWidthMm;
+        int32_t physicalHeightMm;
+        uint64_t renderDevice;
+        uint32_t formatCount;
+        bool dmabufAvailable;
+    };
+
+    struct FormatEntry
+    {
+        uint32_t format;
+        uint32_t padding;
+        uint64_t modifier;
+    };
+
+    struct ConfigurePayload
+    {
+        uint32_t width;
+        uint32_t height;
+        bool fullscreen;
+        bool maximized;
+    };
+
+    struct RegisterBufferPayload
+    {
+        uint32_t generation;
+        uint32_t index;
+        BufferKind kind;
+        uint32_t width;
+        uint32_t height;
+        uint32_t format;
+        uint64_t modifier;
+        uint32_t planeCount;
+        uint32_t offsets[MAX_PLANES];
+        uint32_t strides[MAX_PLANES];
+    };
+
+    struct ForgetBuffersPayload
+    {
+        uint32_t generation;
     };
 
     struct FrameReadyPayload
     {
+        uint32_t generation;
         uint32_t index;
         uint64_t sequence;
         uint64_t frameTimeNanos;
+        bool hasFence;
     };
 
     struct BufferReleasedPayload
     {
+        uint32_t generation;
         uint32_t index;
+    };
+
+    struct TitlePayload
+    {
+        char title[MAX_NAME_BYTES];
+    };
+
+    struct FullscreenPayload
+    {
+        bool fullscreen;
     };
 
     struct PresentDonePayload
@@ -146,9 +219,14 @@ namespace ControlChannel
     union Payload
     {
         HelloPayload hello;
-        BuffersPayload buffers;
+        DisplayPayload display;
+        ConfigurePayload configure;
+        RegisterBufferPayload registerBuffer;
+        ForgetBuffersPayload forgetBuffers;
         FrameReadyPayload frameReady;
         BufferReleasedPayload bufferReleased;
+        TitlePayload title;
+        FullscreenPayload fullscreen;
         PresentDonePayload presentDone;
         InputPayload input;
         ProgressPayload progress;

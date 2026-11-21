@@ -49,6 +49,7 @@ output=$(timeout 180 "$launcher" \
     --framework-res "$frameworkRes" \
     --data-root "$dataRoot" \
     --activity "$activityClass" \
+    --setting window-host=0 \
     --guest-env "GLES_FRAMES=$frames" \
     "$apk" 2>&1)
 

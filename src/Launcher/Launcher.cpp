@@ -10,6 +10,8 @@
 #include <set>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <csignal>
 #include <dirent.h>
 #include <mutex>
 #include <fcntl.h>
@@ -39,6 +41,8 @@
 #include "Sandbox/Sandbox.hpp"
 #include "Settings/Settings.hpp"
 #include "TranslationCache/TranslationCache.hpp"
+#include "WaylandClient/WaylandClient.hpp"
+#include "WindowHost/WindowHost.hpp"
 #if defined(RUNTIME_HAVE_VULKAN)
 #include "VulkanWsi/VulkanWsi.hpp"
 #endif
@@ -48,6 +52,7 @@
 #include "Platform/Platform.hpp"
 
 static bool gVerboseConsole = false;
+static bool gPrivateRoot = false;
 static bool gPretranslationDeclined = false;
 
 static constexpr uint64_t PRETRANSLATE_BUDGET_BYTES = 64ull << 20;
@@ -68,7 +73,8 @@ void Launcher::PrintUsage(const char* program)
     fprintf(stderr, "  --fps         draw the frame rate onto the app's own frames\n");
     fprintf(stderr, "  --verbose     print everything the runtime does; the default when output is not a terminal\n");
     fprintf(stderr, "  --quiet       print only the headlines; the default at a terminal\n");
-    fprintf(stderr, "  --decorated   ask the compositor for a title bar and window frame\n");
+    fprintf(stderr, "  --decorated   give the window the desktop's own title bar; the default\n");
+    fprintf(stderr, "  --undecorated a bare window with no title bar\n");
     fprintf(stderr, "  --fullscreen  ask the compositor for the whole output\n");
     fprintf(stderr, "  --aot         translate every arm64 image before the app starts, the default\n");
     fprintf(stderr, "  --jit         translate nothing ahead of time: interpret guest code, then compile hot regions as it runs\n");
@@ -580,6 +586,14 @@ Launcher::Result Launcher::ParseArguments(int argc, char** argv, Options& option
         if (strcmp(argument, "--decorated") == 0)
         {
             options.decorated = true;
+            options.undecorated = false;
+            continue;
+        }
+
+        if (strcmp(argument, "--undecorated") == 0)
+        {
+            options.undecorated = true;
+            options.decorated = false;
             continue;
         }
 
@@ -865,6 +879,7 @@ Launcher::Result Launcher::ParseArguments(int argc, char** argv, Options& option
     if (options.reportFrameRate) SetUnlessPresent(FRAME_RATE_SETTING, "1");
     if (options.reportFrameRate) SetUnlessPresent(FrameRate::OVERLAY_SETTING, "1");
     if (options.decorated) SetUnlessPresent(DECORATED_SETTING, "1");
+    if (options.undecorated) SetUnlessPresent(DECORATED_SETTING, "0");
     if (options.fullscreen) SetUnlessPresent(FULLSCREEN_SETTING, "1");
     if (options.network) SetUnlessPresent(NETWORK_SETTING, "1");
 
@@ -990,6 +1005,36 @@ static void AddParentIfRequested(std::vector<std::string>& paths, const char* va
     size_t slash = path.find_last_of('/');
 
     AddPathIfPresent(paths, slash == std::string::npos ? std::string(".") : path.substr(0, slash));
+}
+
+static void AddDisplayPaths(std::vector<std::string>& writablePaths, std::vector<std::string>& devicePaths, bool mountedSeparately)
+{
+    if (!ControlChannel::IsConfigured())
+    {
+        AddPathIfPresent(writablePaths, Settings::RuntimeDirectory());
+        AddPathIfPresent(devicePaths, Launcher::RENDER_DEVICE_DIRECTORY);
+        return;
+    }
+
+    for (const char* socket : Launcher::AUDIO_SOCKETS) AddPathIfPresent(writablePaths, Settings::RuntimeDirectory() + "/" + socket);
+
+    if (!mountedSeparately)
+    {
+        AddPathIfPresent(devicePaths, Launcher::RENDER_DEVICE_DIRECTORY);
+        return;
+    }
+
+    DIR* directory = opendir(Launcher::RENDER_DEVICE_DIRECTORY);
+    if (!directory) return;
+
+    while (dirent* entry = readdir(directory))
+    {
+        if (strncmp(entry->d_name, Launcher::RENDER_NODE_PREFIX, strlen(Launcher::RENDER_NODE_PREFIX)) != 0) continue;
+
+        AddPathIfPresent(devicePaths, std::string(Launcher::RENDER_DEVICE_DIRECTORY) + "/" + entry->d_name);
+    }
+
+    closedir(directory);
 }
 
 static bool PretranslationRequested(const Launcher::Options& options)
@@ -1123,7 +1168,7 @@ static void IsolateThisProcess(const Launcher::Options& options)
     std::string home = Settings::HomeDirectory();
     if (!home.empty()) AddPathIfPresent(isolation.writablePaths, home + "/.cache/nvidia");
 
-    AddPathIfPresent(isolation.writablePaths, Settings::RuntimeDirectory());
+    AddDisplayPaths(isolation.writablePaths, isolation.devicePaths, true);
 
     AddParentIfRequested(isolation.writablePaths, Launcher::FRAME_DUMP_SETTING);
     AddParentIfRequested(isolation.writablePaths, Overlay::CAPTURE_SETTING);
@@ -1136,7 +1181,6 @@ static void IsolateThisProcess(const Launcher::Options& options)
     AddPathIfPresent(isolation.devicePaths, "/dev/full");
     AddPathIfPresent(isolation.devicePaths, "/dev/random");
     AddPathIfPresent(isolation.devicePaths, "/dev/urandom");
-    AddPathIfPresent(isolation.devicePaths, "/dev/dri");
     AddPathIfPresent(isolation.devicePaths, "/dev/char");
     AddPathIfPresent(isolation.devicePaths, "/dev/nvidiactl");
     AddPathIfPresent(isolation.devicePaths, "/dev/nvidia0");
@@ -1150,6 +1194,8 @@ static void IsolateThisProcess(const Launcher::Options& options)
         fprintf(stderr, "[launcher] the host filesystem stays visible: %s\n", Sandbox::ResultName(isolated));
         return;
     }
+
+    gPrivateRoot = report.rootReplaced;
 
     if (gVerboseConsole)
     {
@@ -1402,7 +1448,8 @@ static void ConfineThisProcess(const Launcher::Options& options, const std::stri
         std::string home = Settings::HomeDirectory();
         if (!home.empty()) AddPathIfPresent(policy.writablePaths, home + "/.cache/nvidia");
 
-        AddPathIfPresent(policy.writablePaths, Settings::RuntimeDirectory());
+        AddDisplayPaths(policy.writablePaths, policy.devicePaths, false);
+        if (gPrivateRoot) AddPathIfPresent(policy.writablePaths, "/tmp");
 
         AddParentIfRequested(policy.writablePaths, Launcher::FRAME_DUMP_SETTING);
         AddParentIfRequested(policy.writablePaths, Overlay::CAPTURE_SETTING);
@@ -1410,7 +1457,6 @@ static void ConfineThisProcess(const Launcher::Options& options, const std::stri
         AddParentIfRequested(policy.writablePaths, Diagnostics::FILE_SETTING);
         AddParentIfRequested(policy.writablePaths, Diagnostics::TOMBSTONE_SETTING);
 
-        AddPathIfPresent(policy.devicePaths, "/dev/dri");
         AddPathIfPresent(policy.devicePaths, "/dev/char");
         AddPathIfPresent(policy.devicePaths, "/dev/nvidiactl");
         AddPathIfPresent(policy.devicePaths, "/dev/nvidia0");
@@ -1610,6 +1656,89 @@ static void StopShellWatchdog()
 {
     if (!gWatchdogRunning.exchange(false)) return;
     if (gWatchdog.joinable()) gWatchdog.join();
+}
+
+static constexpr int STARTUP_POLL_MILLIS = 250;
+static constexpr uint64_t STARTUP_REPORT_SECONDS = 5;
+
+static std::mutex gStartupMutex;
+static std::condition_variable gStartupWake;
+static bool gStartupReporterStopping = false;
+static std::thread gStartupReporter;
+
+static void DescribeStartup(GuestRuntime::Instance* guest, JniBridge::Instance* bridge, double elapsed, uint64_t& previousCompiled)
+{
+    if (!guest || !bridge)
+    {
+        fprintf(stderr, "[acl] still starting after %.0f s, the app's Java code is running\n", elapsed);
+        return;
+    }
+
+    JniBridge::Statistics loader = JniBridge::GetStatistics(*bridge);
+    const GuestRuntime::Statistics& counters = GuestRuntime::GetStatistics(*guest);
+
+    const uint64_t compiled = std::atomic_ref<const uint64_t>(counters.regionsRecompiled).load(std::memory_order_relaxed);
+    const uint64_t compiledNow = compiled - previousCompiled;
+    previousCompiled = compiled;
+
+    if (loader.guestLibrariesLoaded == 0)
+    {
+        fprintf(stderr, "[acl] still starting after %.0f s, the app's Java code is running and no native library is loaded yet\n", elapsed);
+        return;
+    }
+
+    std::string compiling;
+    if (compiledNow > 0)
+        compiling = ", compiled " + std::to_string(compiledNow) + " more piece(s) of its native code";
+    else
+        compiling = ", no new native code to compile";
+
+    fprintf(stderr, "[acl] still starting after %.0f s: %llu native librar%s loaded, the latest %s%s\n", elapsed,
+            (unsigned long long)loader.guestLibrariesLoaded, loader.guestLibrariesLoaded == 1 ? "y" : "ies",
+            loader.latestGuestLibrary.c_str(), compiling.c_str());
+}
+
+static void StartStartupReporter(GuestRuntime::Instance* guest, JniBridge::Instance* bridge)
+{
+    gStartupReporterStopping = false;
+
+    gStartupReporter = std::thread([guest, bridge]() {
+        const auto started = std::chrono::steady_clock::now();
+        uint64_t nextReport = STARTUP_REPORT_SECONDS;
+        uint64_t previousCompiled = 0;
+
+        std::unique_lock<std::mutex> lock(gStartupMutex);
+
+        while (!gStartupReporterStopping)
+        {
+            gStartupWake.wait_for(lock, std::chrono::milliseconds(STARTUP_POLL_MILLIS));
+            if (gStartupReporterStopping) return;
+
+            const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+
+            if (FrameRate::TotalFrames() > 0)
+            {
+                fprintf(stderr, "[acl] the app is on screen after %.1f s\n", elapsed);
+                return;
+            }
+
+            if (elapsed < (double)nextReport) continue;
+
+            nextReport += STARTUP_REPORT_SECONDS;
+            DescribeStartup(guest, bridge, elapsed, previousCompiled);
+        }
+    });
+}
+
+static void StopStartupReporter()
+{
+    {
+        std::lock_guard<std::mutex> guard(gStartupMutex);
+        gStartupReporterStopping = true;
+    }
+
+    gStartupWake.notify_all();
+    if (gStartupReporter.joinable()) gStartupReporter.join();
 }
 
 static const char* LeafOf(const char* path)
@@ -1909,6 +2038,54 @@ Launcher::Result Launcher::PrepareNativeLibraries(const Options& options, const 
     return Result::Ok;
 }
 
+static bool BecomeWindowHost(const Launcher::Options& options, int& exitStatus)
+{
+    if (options.translateOnly || ControlChannel::IsConfigured() || !WindowHost::IsWanted()) return false;
+
+    ControlChannel::Endpoint host{};
+    int appDescriptor = ControlChannel::INVALID_FILE_DESCRIPTOR;
+
+    if (ControlChannel::CreatePair(host, appDescriptor) != ControlChannel::Result::Ok)
+    {
+        fprintf(stderr, "[launcher] the window host cannot be set up, so the app opens its own window\n");
+        return false;
+    }
+
+    int lifeline[2] = {-1, -1};
+    pid_t app = pipe2(lifeline, O_CLOEXEC) == 0 ? fork() : -1;
+
+    if (app < 0)
+    {
+        fprintf(stderr, "[launcher] the window host cannot be started, so the app opens its own window\n");
+        if (lifeline[0] >= 0) close(lifeline[0]);
+        if (lifeline[1] >= 0) close(lifeline[1]);
+        ControlChannel::Close(host);
+        close(appDescriptor);
+        return false;
+    }
+
+    if (app == 0)
+    {
+        close(lifeline[1]);
+        ControlChannel::Close(host);
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+
+        char ignored = 0;
+        fcntl(lifeline[0], F_SETFL, O_NONBLOCK);
+        if (read(lifeline[0], &ignored, 1) == 0) _exit(1);
+        close(lifeline[0]);
+
+        ControlChannel::PublishDescriptor(appDescriptor);
+        return false;
+    }
+
+    close(lifeline[0]);
+    close(appDescriptor);
+
+    exitStatus = WindowHost::Run(host, app);
+    return true;
+}
+
 Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
 {
     exitStatus = 1;
@@ -1934,6 +2111,8 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
     if (!ArtRuntime::PathExists(options.hostRoot)) return Result::HostRootMissing;
     if (!ArtRuntime::PathExists(options.frameworkJar)) return Result::FrameworkJarMissing;
     if (!ArtRuntime::PathExists(options.apkPath)) return Result::ApkNotFound;
+
+    if (BecomeWindowHost(options, exitStatus)) return Result::Ok;
 
     IsolateThisProcess(options);
 
@@ -2080,6 +2259,9 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
 
     ArtRuntime::Vm vm;
     NameProcessAfterPackage(package.manifest.packageName);
+
+    std::string label = Apk::ResolveLabel(package);
+    SetUnlessPresent(WaylandClient::TITLE_SETTING, label.empty() ? package.manifest.packageName : label);
 
     fprintf(stderr, "[launcher] %s declares %zu activit%s, %zu service(s), %zu receiver(s), %zu provider(s)\n",
             package.manifest.packageName.c_str(), package.manifest.activities.size(),
@@ -2279,6 +2461,8 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
                 : signingInfo.signers.front().subject.c_str());
     fprintf(stderr, "[acl] running, close the window to stop\n");
 
+    StartStartupReporter(guestStarted ? &guest : nullptr, guestStarted ? &bridge : nullptr);
+
     Result result = Result::Ok;
     ArtRuntime::Result registerResult = FrameworkJni::RegisterAll(vm);
     if (registerResult != ArtRuntime::Result::Ok)
@@ -2321,6 +2505,8 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
                 jstring libraryDir = env->NewStringUTF(androidLibraryDirectory.c_str());
                 jint status = env->CallStaticIntMethod(bootstrap, start, dataDir, libraryDir);
 
+                StopStartupReporter();
+
                 if (ArtRuntime::DescribeAndClearException(vm))
                 {
                     result = Result::BootstrapFailed;
@@ -2337,6 +2523,8 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
             }
         }
     }
+
+    StopStartupReporter();
 
     if (guestStarted)
     {
@@ -2362,6 +2550,13 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
             fprintf(stderr, "[launcher] the host driver presented %llu guest frame(s) and refused %llu guest allocator(s)\n",
                     (unsigned long long)vulkanCounters.framesPresented,
                     (unsigned long long)vulkanCounters.guestAllocatorsRefused);
+
+            VulkanWsi::HostedStatistics hostedCounters = VulkanWsi::GetHostedStatistics();
+            if (hostedCounters.framesShared + hostedCounters.framesCopied > 0)
+            {
+                fprintf(stderr, "[launcher] the window host got %llu Vulkan frame(s) as shared gpu images and %llu as copies\n",
+                        (unsigned long long)hostedCounters.framesShared, (unsigned long long)hostedCounters.framesCopied);
+            }
         }
         const char* pacingReport = Settings::Lookup(Launcher::PACING_REPORT_SETTING);
         if (pacingReport && pacingReport[0] != '\0') VulkanWsi::WritePacingReport(pacingReport);
@@ -2373,6 +2568,12 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
         {
             fprintf(stderr, "[launcher] the host driver swapped %llu guest frame(s) and made %llu window surface(s) for OpenGL ES\n",
                     (unsigned long long)glesCounters.framesPresented, (unsigned long long)glesCounters.surfacesCreated);
+
+            if (glesCounters.framesShared + glesCounters.framesCopied > 0)
+            {
+                fprintf(stderr, "[launcher] the window host got %llu OpenGL ES frame(s) as shared gpu buffers and %llu as copies\n",
+                        (unsigned long long)glesCounters.framesShared, (unsigned long long)glesCounters.framesCopied);
+            }
         }
 #endif
     }

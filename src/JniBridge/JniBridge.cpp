@@ -2480,6 +2480,7 @@ static bool LoadTranslateAndInitialize(JniBridgeState* state, const std::string&
     {
         std::lock_guard<std::recursive_mutex> guard(state->mutex);
         state->statistics.guestLibrariesLoaded += 1;
+        state->statistics.latestGuestLibrary = path.substr(path.find_last_of('/') + 1);
     }
 
     if (state->translator && !state->translator(state->translatorContext, *state->runtime, moduleId, path.c_str()))
