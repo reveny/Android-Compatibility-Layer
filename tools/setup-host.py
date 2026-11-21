@@ -33,10 +33,8 @@ def say(phase: str = 'main'):
     def decorator(func):
         def wrapper(*args, **kwargs):
             print(f'\n=== {phase} ===\n')
-            func(*args, **kwargs)
-
+            return func(*args, **kwargs)
         return wrapper
-
     return decorator
 
 
@@ -121,6 +119,7 @@ def phasePackages():
     print("this script does not run sudo for you; re-run it once the above has finished")
     return 1
 
+
 @say("aosp")
 def phaseAosp():
     local_dir = os.getcwd()
@@ -160,19 +159,22 @@ def phaseAosp():
         print(f"sync incomplete (exit {p.returncode}) - just run this script again, it resumes.")
         exit(p.returncode)
 
+
 @say("art")
 def phaseArt():
     if not os.path.exists(f"{AOSP_DIR}/.repo"):
         print(f"no aosp checkout at {AOSP_DIR} - run the aosp phase first")
         exit(1)
     os.environ['AOSP_DIR'] = AOSP_DIR
-    os.environ['PATH'] = os.environ['PATH'] + ":"+ "/usr/sbin/"
+    os.environ['PATH'] = os.environ['PATH'] + ":" + "/usr/sbin/"
     p = subprocess.run([f"{PROJ_DIR}/tools/build-art-host.sh"])
     if p.returncode != 0:
         exit(p.returncode)
     p = subprocess.run([f"{PROJ_DIR}/tools/extract-icu-data.sh"])
     if p.returncode != 0:
         exit(p.returncode)
+
+
 @say("sdk")
 def phaseSdk():
     manager = f"{SDK_DIR}/cmdline-tools/latest/bin/sdkmanager"
@@ -185,7 +187,7 @@ def phaseSdk():
             print(f"could not fetch {SDK_TOOLS_URL}")
             print("that url carries a build number and goes stale; pass a current one in ACL_SDK_TOOLS_URL")
             exit(1)
-        p =  subprocess.run(['unzip', '-q', '-o', archive, '-d', f"{SDK_DIR}/cmdline-tools"])
+        p = subprocess.run(['unzip', '-q', '-o', archive, '-d', f"{SDK_DIR}/cmdline-tools"])
         if p.returncode != 0:
             exit(p.returncode)
         os.remove(archive)
@@ -204,10 +206,11 @@ def phaseSdk():
     )
     subprocess.run([manager, f'--sdk_root={SDK_DIR}', f"platforms;{SDK_PLATFORM}", f"build-tools;{SDK_BUILD_TOOLS}"])
 
+
 @say("env")
 def phaseEnv():
     os.makedirs(TOOLCHAIN_DIR, exist_ok=True)
-    with open(ENV_FILE,'w', encoding="utf-8", newline='\n') as f:
+    with open(ENV_FILE, 'w', encoding="utf-8", newline='\n') as f:
         f.write(f'''export AOSP_DIR="{AOSP_DIR}"
 export RUNTIME_HOST_ROOT="{AOSP_DIR}/out/host/linux-x86"
 export ANDROID_SDK_ROOT="{SDK_DIR}"
@@ -216,6 +219,7 @@ export RUNTIME_FRAMEWORK_RES="{SDK_DIR}/platforms/{SDK_PLATFORM}/android.jar"
 export PATH="{os.environ['HOME']}/.local/bin:{os.environ['PATH']}"''')
     print(f"wrote {ENV_FILE}")
 
+
 @say("status")
 def report():
     surveyPackages()
@@ -223,7 +227,8 @@ def report():
     aospOk = os.path.exists(f"{AOSP_DIR}/.repo") and os.path.exists(f"{AOSP_DIR}/art")
     artOk = os.path.exists(f"{AOSP_DIR}/out/host/linux-x86/lib64/libart.so")
     d8Ok = os.path.exists(f"{AOSP_DIR}/out/host/linux-x86/framework/d8.jar")
-    icuOk = len([i for i in os.listdir(f"{AOSP_DIR}/out/host/linux-x86/com.android.i18n/etc/icu/") if i.endswith('.dat')]) > 0
+    icuOk = len(
+        [i for i in os.listdir(f"{AOSP_DIR}/out/host/linux-x86/com.android.i18n/etc/icu/") if i.endswith('.dat')]) > 0
     sdkOk = os.path.exists(f"{SDK_DIR}/platforms/{SDK_PLATFORM}/android.jar")
     buildToolsOk = os.path.exists(f"{SDK_DIR}/build-tools/{SDK_BUILD_TOOLS}")
     envOk = os.path.exists(ENV_FILE)
@@ -237,6 +242,7 @@ def report():
     print(' %-22s %s\n' % ("env.sh", envOk))
     print('\n toolchain root: %s\n' % TOOLCHAIN_DIR)
     return packagesOk and artOk and d8Ok and sdkOk
+
 
 def llvmVersionOk():
     if which("llvm-config"):
@@ -275,13 +281,13 @@ def main():
     if not phases:
         phases = ['packages', 'aosp', 'art', 'sdk', 'env']
     if checkOnly:
-        return report()
+        return print(report())
     os.makedirs(TOOLCHAIN_DIR, exist_ok=True)
-    if 'packages' in phases:phasePackages()
-    if 'aosp' in phases:phaseAosp()
-    if 'art' in phases:phaseArt()
-    if 'sdk' in phases:phaseSdk()
-    if 'env' in phases:phaseEnv()
+    if 'packages' in phases: phasePackages()
+    if 'aosp' in phases: phaseAosp()
+    if 'art' in phases: phaseArt()
+    if 'sdk' in phases: phaseSdk()
+    if 'env' in phases: phaseEnv()
     if report():
         print('''
 setup complete. build with:
@@ -293,6 +299,7 @@ CMake picks .toolchain up on its own. For the gates and for running an apk, sour
   source .toolchain/env.sh
         ''')
     exit(0)
+
 
 if __name__ == '__main__':
     main()
