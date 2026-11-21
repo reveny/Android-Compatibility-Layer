@@ -236,7 +236,7 @@ def report():
     print(' %-22s %s\n' % ("sdk build-tools", buildToolsOk))
     print(' %-22s %s\n' % ("env.sh", envOk))
     print('\n toolchain root: %s\n' % TOOLCHAIN_DIR)
-    return all([packagesOk, artOk, d8Ok, sdkOk])
+    return packagesOk and artOk and d8Ok and sdkOk
 
 def llvmVersionOk():
     if which("llvm-config"):
@@ -262,12 +262,12 @@ def main():
     for argument in sys.argv[1:]:
         if argument == '--check':
             checkOnly = True
-        if argument in ['--help', '-h']:
+        elif argument in ['--help', '-h']:
             print("setup-host.py [--check] [phase ...]")
             print("  phases: packages aosp art sdk env")
             print("  everything lands in .toolchain/ rather than spread over the home directory")
             exit(0)
-        if argument in ['packages', 'aosp', 'art', 'sdk', 'env']:
+        elif argument in ['packages', 'aosp', 'art', 'sdk', 'env']:
             phases.append(argument)
         else:
             print(f"unknown argument: {argument}")
