@@ -28,6 +28,7 @@ public class Activity extends ContextThemeWrapper implements LayoutInflater.Fact
     private SharedElementCallback mExitSharedElementCallback;
     private android.content.LocusId mLocusId;
     private Bundle mLocusBundle;
+    String mReferrer;
 
     private static final int FRAGMENT_REQUEST_BASE = 0x00ff0000;
 
