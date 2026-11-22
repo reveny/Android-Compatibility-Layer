@@ -370,6 +370,53 @@ public final class Parcel
         return new String(characters);
     }
 
+    public String readString8()
+        {
+            int start = mPosition;
+            int length = readInt();
+            if (length < 0) return null;
+
+            int bytes = padded(length + 1);
+            if (length > mSize || mPosition + bytes > mSize)
+            {
+                mPosition = start;
+                return null;
+            }
+
+            String result = new String(mData, mPosition, length, java.nio.charset.StandardCharsets.UTF_8);
+            mPosition += bytes;
+            return result;
+        }
+        public void writeString8(String val)
+        {
+            if (val == null)
+            {
+                writeInt(-1);
+                return;
+            }
+
+            byte[] utf8Bytes = val.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            int length = utf8Bytes.length;
+            int bytes = padded(length + 1);
+
+            if (mPosition + 4 + bytes > mData.length)
+            {
+                byte[] next = new byte[Math.max(mData.length * 2, mPosition + 4 + bytes)];
+                System.arraycopy(mData, 0, next, 0, mSize);
+                mData = next;
+            }
+
+            writeInt(length);
+            System.arraycopy(utf8Bytes, 0, mData, mPosition, length);
+            for (int i = length; i < bytes; i++)
+            {
+                mData[mPosition + i] = 0;
+            }
+
+            mPosition += bytes;
+            if (mPosition > mSize) mSize = mPosition;
+        }
+
     public void writeStrongBinder(IBinder value)
     {
         writeLocal(value);
