@@ -771,10 +771,23 @@ public class Activity extends ContextThemeWrapper implements LayoutInflater.Fact
     public void clearOverrideActivityTransition(int overrideType)
     {
     }
-
     public android.net.Uri getReferrer()
     {
-        return null;
+        android.content.Intent intent = getIntent();
+        if (intent != null) {
+            android.net.Uri referrer = intent.getParcelableExtra(android.content.Intent.EXTRA_REFERRER);
+            if (referrer != null) {
+                return referrer;
+            }
+            String referrerName = intent.getStringExtra(android.content.Intent.EXTRA_REFERRER_NAME);
+            if (referrerName != null) {
+                try {
+                    return android.net.Uri.parse(referrerName);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return android.net.Uri.parse("android-app://com.android.launcher");
     }
 
     public String getLaunchedFromPackage()
