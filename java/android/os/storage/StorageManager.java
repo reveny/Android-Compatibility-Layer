@@ -87,6 +87,15 @@ public class StorageManager
     {
         return null;
     }
+
+    public @NonNull String getVolumeState(String mountPoint) {
+            final StorageVolume vol = getStorageVolume(new File(mountPoint));
+            if (vol != null) {
+                return vol.getState();
+            } else {
+                return Environment.MEDIA_UNKNOWN;
+            }
+        }
     @Deprecated
     public @NonNull String[] getVolumePaths() {
             StorageVolume[] volumes = getVolumeList();
