@@ -6,7 +6,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.ParcelFileDescriptor;
 import android.os.ProxyFileDescriptorCallback;
-
+import android.annotation.NonNull;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.IOException;
@@ -86,6 +86,16 @@ public class StorageManager
     public String getMountedObbPath(String rawPath)
     {
         return null;
+    }
+    @Deprecated
+    public @NonNull String[] getVolumePaths() {
+            StorageVolume[] volumes = getVolumeList();
+            int count = volumes.length;
+            String[] paths = new String[count];
+            for (int i = 0; i < count; i++) {
+                paths[i] = volumes[i].getPath();
+            }
+            return paths;
     }
 
     public android.app.PendingIntent getManageSpaceActivityIntent(String packageName, int requestCode)
