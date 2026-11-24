@@ -393,11 +393,7 @@ public class VolumeInfo implements Parcelable {
         }
     }
 
-    @UnsupportedAppUsage
-    public StorageVolume buildStorageVolume(Context context, int userId, boolean reportUnmounted) {
-        final StorageManager storage = context.getSystemService(StorageManager.class);
 
-    }
 
     @UnsupportedAppUsage
     public static int buildStableMtpStorageId(String fsUuid) {
