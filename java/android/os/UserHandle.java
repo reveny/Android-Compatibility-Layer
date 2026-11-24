@@ -3,6 +3,7 @@ package android.os;
 public final class UserHandle implements Parcelable
 {
     public static final int USER_SYSTEM = 0;
+    public static final int USER_NULL = -10000;
 
     public static final Creator<UserHandle> CREATOR = new Creator<UserHandle>()
     {

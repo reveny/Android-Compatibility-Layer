@@ -18,7 +18,8 @@ public final class StorageVolume implements Parcelable
     private static final String PRIMARY_DESCRIPTION = "Internal shared storage";
     private static final String MEDIA_STORE_VOLUME_PRIMARY = "external_primary";
     private static final String ACTION_OPEN_DOCUMENT_TREE = "android.intent.action.OPEN_DOCUMENT_TREE";
-
+    public static final int STORAGE_ID_INVALID = 0x00000000;
+    public static final int STORAGE_ID_PRIMARY = 0x00010001;
     public static final Parcelable.Creator<StorageVolume> CREATOR = new Parcelable.Creator<StorageVolume>()
     {
         @Override
