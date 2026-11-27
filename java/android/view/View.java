@@ -4992,7 +4992,7 @@ public class View implements android.view.accessibility.AccessibilityEventSource
 
     private boolean mInLayout;
     private boolean mEverLaidOut;
-    private boolean mDirty = true;
+    public boolean mDirty = true;
     private boolean mPendingInsetsRequest;
     private boolean mPaddingRelative;
     private CharSequence mContentDescription;

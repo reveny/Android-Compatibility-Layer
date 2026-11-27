@@ -70,7 +70,11 @@ public class LayerDrawable extends Drawable implements Drawable.Callback
         drawable.setLayoutDirection(getLayoutDirection());
         drawable.setLevel(getLevel());
         drawable.setVisible(isVisible(), true);
-        drawable.setState(getState());
+         int[] state = getState();
+         if (state != null && state.length > 0)
+         {
+          drawable.setState(state);
+         }
         if (getAlpha() != 255) drawable.setAlpha(getAlpha());
         if (getColorFilter() != null) drawable.setColorFilter(getColorFilter());
     }

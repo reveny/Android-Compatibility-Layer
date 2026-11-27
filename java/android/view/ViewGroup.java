@@ -895,11 +895,33 @@ public class ViewGroup extends View implements ViewParent, ViewManager
         return null;
     }
 
-    @Override
-    public void invalidateChild(View child, android.graphics.Rect dirty)
-    {
-        invalidate();
-    }
+        @Override
+        public void invalidateChild(View child, android.graphics.Rect dirty)
+        {
+            ViewParent parent = this;
+            java.util.HashSet<ViewParent> visited = new java.util.HashSet<>();
+
+            while (parent != null)
+            {
+                if (!visited.add(parent))
+                {
+                    break;
+                }
+
+                if (parent instanceof View)
+                {
+                    View v = (View) parent;
+                    v.mDirty = true;
+                    parent = v.getParent();
+                }
+                else
+                {
+                    parent.invalidateChild(child, dirty);
+                    break;
+                }
+            }
+        }
+
 
     public boolean shouldDelayChildPressedState()
     {
