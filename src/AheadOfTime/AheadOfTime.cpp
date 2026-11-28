@@ -27,7 +27,7 @@ extern char** environ;
 static AheadOfTime::ProgressCallback gProgressCallback = nullptr;
 static void* gProgressContext = nullptr;
 
-void AheadOfTime::SetProgressCallback(AheadOfTime::ProgressCallback callback, void* context)
+void AheadOfTime::SetProgressCallback(ProgressCallback callback, void* context)
 {
     gProgressCallback = callback;
     gProgressContext = context;
@@ -97,7 +97,7 @@ static bool RunLinker(const std::vector<std::string>& objectPaths, const std::st
     std::string flag = "-o";
 
     std::vector<char*> arguments;
-    arguments.push_back((char*)linker.c_str());
+    arguments.push_back(const_cast<char *>(linker.c_str()));
     arguments.push_back((char*)shared.c_str());
     arguments.push_back((char*)flag.c_str());
     arguments.push_back((char*)libraryPath.c_str());
@@ -141,7 +141,7 @@ static void RebuildRanges(const std::set<uint64_t>& starts, uint64_t executableE
     for (size_t index = 0; index < ranges.size(); ++index)
     {
         uint64_t end = index + 1 < ranges.size() ? (uint64_t)ranges[index + 1].startAddress : executableEnd;
-        ranges[index].endAddress = (GuestState::GuestAddress)end;
+        ranges[index].endAddress = static_cast<GuestState::GuestAddress>(end);
     }
 }
 
@@ -189,7 +189,7 @@ static AheadOfTime::Result DiscoverRanges(GuestRuntime::Instance& runtime, uint3
                 {
                     if (instruction.opcode != Ir::Opcode::Call) continue;
                     if (instruction.immediate < (uint64_t)executableStart || instruction.immediate >= (uint64_t)executableEnd) continue;
-                    if (starts.count(instruction.immediate) != 0) continue;
+                    if (starts.contains(instruction.immediate)) continue;
 
                     discovered.insert(instruction.immediate);
                 }
@@ -200,8 +200,8 @@ static AheadOfTime::Result DiscoverRanges(GuestRuntime::Instance& runtime, uint3
                 {
                     if (successor == (uint64_t)Ir::NO_SUCCESSOR) continue;
                     if (successor >= (uint64_t)range.startAddress && successor < (uint64_t)range.endAddress) continue;
-                    if (successor < (uint64_t)executableStart || successor >= (uint64_t)executableEnd) continue;
-                    if (starts.count(successor) != 0) continue;
+                    if (successor < static_cast<uint64_t>(executableStart) || successor >= (uint64_t)executableEnd) continue;
+                    if (starts.contains(successor)) continue;
 
                     discovered.insert(successor);
                 }
@@ -257,7 +257,7 @@ static bool FirstUncoveredAddress(const Ir::Function& function, uint64_t start, 
     for (const Ir::Block& block : function.blocks)
         covered.push_back(std::make_pair((uint64_t)block.guestAddress, (uint64_t)block.guestEndAddress));
 
-    std::sort(covered.begin(), covered.end());
+    std::ranges::sort(covered);
 
     uint64_t cursor = start;
     for (const std::pair<uint64_t, uint64_t>& span : covered)
