@@ -8,7 +8,7 @@ public class PackageInfo implements Parcelable
     public static final int INSTALL_LOCATION_AUTO = 0;
     public static final int INSTALL_LOCATION_INTERNAL_ONLY = 1;
     public static final int INSTALL_LOCATION_PREFER_EXTERNAL = 2;
-
+    public static final int INSTALL_LOCATION_UNSPECIFIED = -1;
     public static final int REQUESTED_PERMISSION_GRANTED = 0x00000002;
     public static final int REQUESTED_PERMISSION_IMPLICIT = 0x00000004;
     public static final int REQUESTED_PERMISSION_NEVER_FOR_LOCATION = 0x00010000;

@@ -427,9 +427,7 @@ public class PackageParser {
         public List<String> getAllCodePaths() {
             ArrayList<String> paths = new ArrayList<>();
             paths.add(baseCodePath);
-            if (!ArrayUtils.isEmpty(splitCodePaths)) {
-                Collections.addAll(paths, splitCodePaths);
-            }
+            Collections.addAll(paths, splitCodePaths);
             return paths;
         }
 

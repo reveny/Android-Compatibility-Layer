@@ -370,7 +370,7 @@ public class PackageManager
          *
          * @hide
          */
-        
+        public static final int INSTALL_SUCCEEDED = 1;
         public static final int INSTALL_PARSE_FAILED_MANIFEST_EMPTY = -109;
 
         /**
