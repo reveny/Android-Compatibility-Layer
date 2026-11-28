@@ -3,7 +3,7 @@ package android.os;
 public final class Trace
 {
     public static final long TRACE_TAG_APP = 1L << 12;
-
+        public static final long TRACE_TAG_PACKAGE_MANAGER = 1L << 18;
     private Trace()
     {
     }

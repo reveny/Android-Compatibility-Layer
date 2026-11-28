@@ -12,7 +12,6 @@ public class PackageInfo implements Parcelable
     public static final int REQUESTED_PERMISSION_GRANTED = 0x00000002;
     public static final int REQUESTED_PERMISSION_IMPLICIT = 0x00000004;
     public static final int REQUESTED_PERMISSION_NEVER_FOR_LOCATION = 0x00010000;
-
     public static final Parcelable.Creator<PackageInfo> CREATOR = new Parcelable.Creator<PackageInfo>()
     {
         @Override
@@ -59,6 +58,9 @@ public class PackageInfo implements Parcelable
     public PackageInfo()
     {
     }
+    public static long composeLongVersionCode(int major, int minor) {
+            return (((long) major) << 32) | (((long) minor) & 0xffffffffL);
+        }
 
     public long getLongVersionCode()
     {
