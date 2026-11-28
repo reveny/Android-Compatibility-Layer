@@ -69,7 +69,7 @@ public class ApplicationInfo extends PackageItemInfo implements Parcelable
     public static final int RAW_EXTERNAL_STORAGE_ACCESS_DEFAULT = 0;
     public static final int RAW_EXTERNAL_STORAGE_ACCESS_REQUESTED = 1;
     public static final int RAW_EXTERNAL_STORAGE_ACCESS_NOT_REQUESTED = 2;
-
+        public boolean hiddenUntilInstalled;
     public static final Parcelable.Creator<ApplicationInfo> CREATOR = new Parcelable.Creator<ApplicationInfo>()
     {
         @Override
@@ -190,7 +190,8 @@ public class ApplicationInfo extends PackageItemInfo implements Parcelable
         processName = original.processName;
         enabled = original.enabled;
     }
-
+    public boolean isSystemApp(){
+    return false;}
     @Override
     public CharSequence loadLabel(PackageManager packageManager)
     {

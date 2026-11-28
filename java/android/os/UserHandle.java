@@ -31,6 +31,9 @@ public final class UserHandle implements Parcelable
     {
         return USER_SYSTEM;
     }
+    public static  int getCallingUserId() {
+            return myUserId();
+        }
 
     @Override
     public int describeContents()

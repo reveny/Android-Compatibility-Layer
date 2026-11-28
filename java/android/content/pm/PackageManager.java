@@ -371,6 +371,8 @@ public class PackageManager
          * @hide
          */
         public static final int INSTALL_SUCCEEDED = 1;
+        public static final int MATCH_HIDDEN_UNTIL_INSTALLED_COMPONENTS =  0x20000000;
+
         public static final int INSTALL_PARSE_FAILED_MANIFEST_EMPTY = -109;
 
         /**
@@ -467,7 +469,8 @@ public class PackageManager
     public static final int MATCH_SYSTEM_ONLY = 0x00100000;
     public static final int MATCH_DIRECT_BOOT_AUTO = 0x10000000;
     public static final int MATCH_APEX = 0x40000000;
-
+    public static final int MATCH_ANY_USER = 0x00400000;
+    public static final int MATCH_KNOWN_PACKAGES = MATCH_UNINSTALLED_PACKAGES | MATCH_ANY_USER;
     public static final int COMPONENT_ENABLED_STATE_DEFAULT = 0;
     public static final int COMPONENT_ENABLED_STATE_ENABLED = 1;
     public static final int COMPONENT_ENABLED_STATE_DISABLED = 2;

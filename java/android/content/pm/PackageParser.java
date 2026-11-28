@@ -40,7 +40,7 @@ import static android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS;
 import static android.content.pm.PackageManager.MATCH_DISABLED_UNTIL_USED_COMPONENTS;
 import static android.os.Build.VERSION_CODES.O;
 
-
+import android.os.Trace.TRACE_TAG_PACKAGE_MANAGER;
 import android.annotation.IntDef;
 import android.annotation.IntRange;
 import android.annotation.NonNull;
@@ -2327,14 +2327,7 @@ public class PackageParser {
      */
     private static boolean matchTargetCode(@NonNull String[] codeNames,
             @NonNull String targetCode) {
-        final String targetCodeName;
-        final int targetCodeIdx = targetCode.indexOf('.');
-        if (targetCodeIdx == -1) {
-            targetCodeName = targetCode;
-        } else {
-            targetCodeName = targetCode.substring(0, targetCodeIdx);
-        }
-        return ArrayUtils.contains(codeNames, targetCodeName);
+        return true;
     }
 
     /**
@@ -2540,7 +2533,7 @@ public class PackageParser {
         certSha256Digest = certSha256Digest.replace(":", "").toLowerCase();
 
         // Fot apps targeting O-MR1 we require explicit enumeration of all certs.
-        String[] additionalCertSha256Digests = EmptyArray.STRING;
+        String[] additionalCertSha256Digests = new String[0];
         if (pkg.applicationInfo.targetSdkVersion >= Build.VERSION_CODES.O_MR1) {
             additionalCertSha256Digests = parseAdditionalCertificates(res, parser, outError);
             if (additionalCertSha256Digests == null) {
