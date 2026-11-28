@@ -87,7 +87,7 @@ public final class ActivityThread
     final ArrayList<Application> mAllApplications = new ArrayList<>();
     final ResourcesManager mResourcesManager = ResourcesManager.getInstance();
     final Instrumentation mInstrumentation = new Instrumentation();
-
+    private boolean mHiddenApiWarningShown = true;
     Application mInitialApplication;
     ContextImpl mSystemContext;
     Configuration mConfiguration;
