@@ -31,7 +31,7 @@ static AndroidfwTheme* ThemeFrom(jlong handle)
 static AndroidfwXml* XmlFrom(jlong handle)
 {
     std::lock_guard<std::mutex> held(gHandleLock);
-    if (handle == 0 || gLiveXml.find(handle) == gLiveXml.end()) return nullptr;
+    if (handle == 0 || !gLiveXml.contains(handle)) return nullptr;
     return reinterpret_cast<AndroidfwXml*>(handle);
 }
 
@@ -327,14 +327,14 @@ static jlong AssetsOpenNonAsset(JNIEnv* env, jclass, jlong handle, jstring path)
 
 static Apk::Asset* AssetFrom(jlong handle)
 {
-    std::lock_guard<std::mutex> held(gHandleLock);
-    if (handle == 0 || gLiveAssets.find(handle) == gLiveAssets.end()) return nullptr;
+    std::lock_guard held(gHandleLock);
+    if (handle == 0 || !gLiveAssets.contains(handle)) return nullptr;
     return reinterpret_cast<Apk::Asset*>(handle);
 }
 
 static Apk::Asset* ClaimAsset(jlong handle)
 {
-    std::lock_guard<std::mutex> held(gHandleLock);
+    std::lock_guard held(gHandleLock);
     if (handle == 0 || gLiveAssets.erase(handle) == 0) return nullptr;
     return reinterpret_cast<Apk::Asset*>(handle);
 }

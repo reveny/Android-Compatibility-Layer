@@ -570,7 +570,7 @@ static const PackageRegistry::Entry* InstalledPackageAt(jint slot)
 
 static jint PackagesCount(JNIEnv*, jclass)
 {
-    return gInstalledPackages ? (jint)gInstalledPackages->size() : 0;
+    return gInstalledPackages ? static_cast<jint>(gInstalledPackages->size()) : 0;
 }
 
 static jstring PackagesNameAt(JNIEnv* env, jclass, jint slot)
@@ -767,8 +767,7 @@ void NotificationsCancelAll(JNIEnv*, jclass)
 
 static void CanvasDrawColor(JNIEnv*, jclass, jlong handle, jint color)
 {
-    Rasterizer::Canvas* canvas = CanvasFrom(handle);
-    if (canvas) Rasterizer::DrawColor(*canvas, static_cast<uint32_t>(color));
+    if (Rasterizer::Canvas* canvas = CanvasFrom(handle)) Rasterizer::DrawColor(*canvas, static_cast<uint32_t>(color));
 }
 
 static void CanvasDrawRect(JNIEnv*, jclass, jlong handle, jint left, jint top, jint right, jint bottom, jint color)
@@ -1184,8 +1183,7 @@ void FrameworkJni::Unimplemented(JNIEnv* env, const char* method)
             jstring label = env->NewStringUTF(method);
             if (init && print && label)
             {
-                jobject trace = env->NewObject(throwable, init, label);
-                if (trace) env->CallVoidMethod(trace, print);
+                if (jobject trace = env->NewObject(throwable, init, label)) env->CallVoidMethod(trace, print);
             }
         }
         env->ExceptionClear();

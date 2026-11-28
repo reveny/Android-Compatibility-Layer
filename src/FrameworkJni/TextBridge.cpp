@@ -231,7 +231,7 @@ static const JNINativeMethod PAINT_METHODS[] = {
 };
 
 static const ArtRuntime::NativeMethodTable TABLES[] = {
-    {TextBridge::TYPEFACE_CLASS, TYPEFACE_METHODS, static_cast<int>(sizeof(TYPEFACE_METHODS) / sizeof(TYPEFACE_METHODS[0]))},
+    {TextBridge::TYPEFACE_CLASS, TYPEFACE_METHODS, static_cast<int>(std::size(TYPEFACE_METHODS))},
     {TextBridge::PAINT_CLASS, PAINT_METHODS, static_cast<int>(sizeof(PAINT_METHODS) / sizeof(PAINT_METHODS[0]))},
 };
 
