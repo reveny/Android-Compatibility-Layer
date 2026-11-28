@@ -28,6 +28,7 @@ public class Activity extends ContextThemeWrapper implements LayoutInflater.Fact
     private SharedElementCallback mExitSharedElementCallback;
     private android.content.LocusId mLocusId;
     private Bundle mLocusBundle;
+    String mReferrer;
 
     private static final int FRAGMENT_REQUEST_BASE = 0x00ff0000;
 
@@ -770,10 +771,23 @@ public class Activity extends ContextThemeWrapper implements LayoutInflater.Fact
     public void clearOverrideActivityTransition(int overrideType)
     {
     }
-
     public android.net.Uri getReferrer()
     {
-        return null;
+        android.content.Intent intent = getIntent();
+        if (intent != null) {
+            android.net.Uri referrer = intent.getParcelableExtra(android.content.Intent.EXTRA_REFERRER);
+            if (referrer != null) {
+                return referrer;
+            }
+            String referrerName = intent.getStringExtra(android.content.Intent.EXTRA_REFERRER_NAME);
+            if (referrerName != null) {
+                try {
+                    return android.net.Uri.parse(referrerName);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return android.net.Uri.parse("android-app://com.android.launcher");
     }
 
     public String getLaunchedFromPackage()
@@ -968,6 +982,9 @@ public class Activity extends ContextThemeWrapper implements LayoutInflater.Fact
     public CharSequence getTitle()
     {
         return mTitle;
+    }
+    public void setTitle(int titleId) {
+        setTitle(getText(titleId));
     }
 
     public void setTitle(CharSequence title)

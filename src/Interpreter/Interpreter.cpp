@@ -3,8 +3,6 @@
 #include "Interpreter/IrSemantics.hpp"
 
 #include <cstdio>
-#include <cstring>
-#include <mutex>
 #include <vector>
 
 using IrSemantics::BitsInType;

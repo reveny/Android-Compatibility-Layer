@@ -239,7 +239,7 @@ AbiBridge::Result AbiBridge::LookupGuestStub(const Registry& registry, const std
     auto found = implementation->trampolineByName.find(symbolName);
     if (found == implementation->trampolineByName.end())
     {
-        if (implementation->dataByName.count(symbolName) != 0) return Result::NotAFunction;
+        if (implementation->dataByName.contains(symbolName)) return Result::NotAFunction;
         return Result::UnknownSymbol;
     }
 
@@ -255,7 +255,7 @@ AbiBridge::Result AbiBridge::LookupGuestData(const Registry& registry, const std
     auto found = implementation->dataByName.find(symbolName);
     if (found == implementation->dataByName.end())
     {
-        if (implementation->trampolineByName.count(symbolName) != 0) return Result::NotDataSymbol;
+        if (implementation->trampolineByName.contains(symbolName)) return Result::NotDataSymbol;
         return Result::UnknownSymbol;
     }
 

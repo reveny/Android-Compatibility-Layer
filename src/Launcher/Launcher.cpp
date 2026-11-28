@@ -1759,22 +1759,22 @@ static void ShowTranslationPercent(void*, const char*, uint64_t completed, uint6
 {
     if (total == 0) return;
 
-    std::lock_guard<std::mutex> guard(gPercentMutex);
+    std::lock_guard guard(gPercentMutex);
 
     if (gLastPercentShown < 0)
     {
         if (gTranslatingBytes >= (1ull << 20))
             fprintf(stderr, "[acl] translating %s, %.1f MiB\n", gTranslatingLibrary.c_str(),
-                    (double)gTranslatingBytes / (double)(1ull << 20));
+                    static_cast<double>(gTranslatingBytes) / static_cast<double>(1ull << 20));
         else
             fprintf(stderr, "[acl] translating %s, %llu KiB\n", gTranslatingLibrary.c_str(),
-                    (unsigned long long)(gTranslatingBytes >> 10));
+                    static_cast<unsigned long long>(gTranslatingBytes >> 10));
 
         gLastPercentShown = 0;
         fflush(stderr);
     }
 
-    const int percent = (int)((completed * 100) / total);
+    const int percent = static_cast<int>((completed * 100) / total);
 
     if (percent == gLastPercentShown) return;
     if (percent < gLastPercentShown + PERCENT_STEP && percent != 100) return;
@@ -1797,7 +1797,7 @@ static void ReportTranslationProgress(const char* imagePath, const AheadOfTime::
     message.payload.progress.functionsTranslated = statistics.functionsTranslated;
     message.payload.progress.blocksTranslated = statistics.blocksTranslated;
     message.payload.progress.cacheHit = statistics.cacheHit;
-    message.payload.progress.memoryBytes = (uint64_t)LlvmBackend::ResidentMegabytes() * 1024ull * 1024ull;
+    message.payload.progress.memoryBytes = LlvmBackend::ResidentMegabytes() * 1024ull * 1024ull;
 
     for (uint32_t phase = 0; phase < ControlChannel::PHASE_COUNT; ++phase) message.payload.progress.phases[phase] = 1.0f;
 
@@ -1809,7 +1809,7 @@ static void ReportTranslationProgress(const char* imagePath, const AheadOfTime::
 
 static bool TranslateGuestLibrary(void* context, GuestRuntime::Instance& runtime, uint32_t moduleId, const char* imagePath)
 {
-    TranslationSet* set = (TranslationSet*)context;
+    TranslationSet* set = static_cast<TranslationSet *>(context);
 
     if (!set->translated.insert(moduleId).second) return true;
 
@@ -2093,8 +2093,8 @@ Launcher::Result Launcher::Run(const Options& options, int& exitStatus)
 
     if (options.windowWidth > 0 && options.windowHeight > 0)
     {
-        Settings::Set(Launcher::WINDOW_WIDTH_SETTING, std::to_string(options.windowWidth));
-        Settings::Set(Launcher::WINDOW_HEIGHT_SETTING, std::to_string(options.windowHeight));
+        Settings::Set(WINDOW_WIDTH_SETTING, std::to_string(options.windowWidth));
+        Settings::Set(WINDOW_HEIGHT_SETTING, std::to_string(options.windowHeight));
 
         const int density = Platform::ConfiguredDensity((uint32_t)options.windowWidth, (uint32_t)options.windowHeight);
         Settings::Set(Platform::DENSITY_SETTING, std::to_string(density));

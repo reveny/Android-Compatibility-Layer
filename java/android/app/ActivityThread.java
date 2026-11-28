@@ -113,6 +113,14 @@ public final class ActivityThread
             return sCurrentActivityThread;
         }
     }
+    float getFloatCoreSetting(String key, float defaultValue) {
+        return defaultValue;
+    }
+
+
+    int getIntCoreSetting(String key, int defaultValue, int deviceId) {
+            return defaultValue;
+    }
 
     public static void attachRuntime(ContextImpl base)
     {

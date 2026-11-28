@@ -8,7 +8,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <malloc.h>
 #include <memory>
@@ -36,8 +35,6 @@
 #include <llvm/TargetParser/Host.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/TargetSelect.h>
-
-#include "Settings/Settings.hpp"
 
 const std::string& LlvmBackend::HostCpuName()
 {

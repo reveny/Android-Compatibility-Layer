@@ -97,12 +97,12 @@ Needs clang, CMake 3.28+, Ninja, LLVM 19+ with headers, FreeType, HarfBuzz, SQLi
 libwebp, Wayland, libxkbcommon.
 
 ```
-./tools/setup-host.sh                      # AOSP host ART + SDK into .toolchain/
+./tools/setup-host.py                      # AOSP host ART + SDK into .toolchain/
 cmake -S . -B build -G Ninja
 cmake --build build -j"$(nproc)"
 ```
 
-`setup-host.sh` clones a reduced AOSP manifest and builds host ART. `--check`
+`setup-host.py` clones a reduced AOSP manifest and builds host ART. `--check`
 reports what is present; phases (`packages`, `aosp`, `art`, `sdk`, `env`) can run individually.
 
 `build/src/acl` finds `.toolchain/` and `build/java/framework.jar` by walking up

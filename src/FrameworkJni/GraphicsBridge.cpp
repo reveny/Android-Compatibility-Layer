@@ -534,7 +534,7 @@ const ArtRuntime::NativeMethodTable* GraphicsBridge::Tables(int& count)
     int bitmapCount = 0;
     const JNINativeMethod* bitmapMethods = FrameworkJniBitmapMethods(bitmapCount);
 
-    TABLES[0] = {PATH_CLASS, PATH_METHODS, static_cast<int>(sizeof(PATH_METHODS) / sizeof(PATH_METHODS[0]))};
+    TABLES[0] = {PATH_CLASS, PATH_METHODS, static_cast<int>(std::size(PATH_METHODS))};
     TABLES[1] = {CANVAS_CLASS, CANVAS_METHODS, static_cast<int>(sizeof(CANVAS_METHODS) / sizeof(CANVAS_METHODS[0]))};
     TABLES[2] = {BITMAP_CLASS, bitmapMethods, bitmapCount};
 

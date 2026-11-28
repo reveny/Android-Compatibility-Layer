@@ -16,6 +16,19 @@ public class IntentFilter
     public IntentFilter()
     {
     }
+    public IntentFilter(IntentFilter o)
+        {
+            if (o == null) return;
+
+            mPriority = o.mPriority;
+            mActions.addAll(o.mActions);
+            mCategories.addAll(o.mCategories);
+            mSchemes.addAll(o.mSchemes);
+            mTypes.addAll(o.mTypes);
+            mSchemeSpecificParts.addAll(o.mSchemeSpecificParts);
+            mDataPaths.addAll(o.mDataPaths);
+            mDataAuthorities.addAll(o.mDataAuthorities);
+     }
 
     public IntentFilter(String action)
     {

@@ -5,7 +5,6 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
-#include <cstdlib>
 #include <ctime>
 #include <fcntl.h>
 #include <linux/futex.h>
@@ -72,11 +71,11 @@ static GuestSyscall::Result FutexSyscall(GuestState::Registers& registers, const
     }
     else
     {
-        deadline = (const void*)(uintptr_t)fourth;
+        deadline = (const void*)fourth;
     }
 
-    long returned = syscall(SYS_futex, (void*)(uintptr_t)address, (int)operation, expected, deadline,
-                            (void*)(uintptr_t)secondAddress, third);
+    long returned = syscall(SYS_futex, (void*)address, (int)operation, expected, deadline,
+                            (void*)secondAddress, third);
 
     registers.general[0] = ErrnoResult(returned);
     return GuestSyscall::Result::Ok;
@@ -89,7 +88,7 @@ static GuestSyscall::Result GetRandomSyscall(GuestState::Registers& registers, c
 
     if (length > MAX_TRANSFER_BYTES) length = MAX_TRANSFER_BYTES;
 
-    std::vector<uint8_t> buffer((size_t)length);
+    std::vector<uint8_t> buffer(length);
     long produced = syscall(SYS_getrandom, buffer.data(), (size_t)length, 0);
 
     if (produced < 0)
@@ -129,8 +128,8 @@ static GuestSyscall::Result ReadSyscall(GuestState::Registers& registers, const 
 
     if (length > MAX_TRANSFER_BYTES) length = MAX_TRANSFER_BYTES;
 
-    std::vector<uint8_t> buffer((size_t)length);
-    long returned = read(descriptor, buffer.data(), (size_t)length);
+    std::vector<uint8_t> buffer(length);
+    long returned = read(descriptor, buffer.data(), length);
 
     if (returned > 0 && !memory.Write(memory.context, (GuestState::GuestAddress)address, buffer.data(), (uint64_t)returned))
         return GuestSyscall::Result::GuestMemoryFault;

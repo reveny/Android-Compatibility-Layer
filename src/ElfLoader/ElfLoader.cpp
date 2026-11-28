@@ -379,7 +379,7 @@ static bool ResolveInGroup(const ElfLoader::Namespace& libraryNamespace, uint32_
         const ElfLoader::Symbol* symbol = FindDefinedSymbol(*library, name);
         if (symbol)
         {
-            address = (uint64_t)symbol->guestAddress;
+            address = static_cast<uint64_t>(symbol->guestAddress);
             return true;
         }
 

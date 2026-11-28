@@ -218,6 +218,8 @@ public final class Bootstrap
             try
             {
                 ContentProvider instance = factory.instantiateProvider(loader, provider.name);
+                if ("rikka.shizuku.ShizukuProvider".equals(provider.name)){
+                provider.exported = true;}
                 instance.attachInfo(application, provider);
                 Log.i(TAG, "provider ready: " + provider.name + " authority=" + provider.authority);
             }
@@ -355,11 +357,15 @@ public final class Bootstrap
                                + " while it was being created, so it stays behind it until that one finishes");
             }
             else
-            {
-                instrumentation.callActivityOnStart(activity);
-                instrumentation.callActivityOnResume(activity);
-                if (activity instanceof android.app.NativeActivity) ((android.app.NativeActivity)activity).attachWindow(width, height);
-            }
+                        {
+                            instrumentation.callActivityOnStart(activity);
+                            if (!activity.isDestroyed())
+                            {
+                                instrumentation.callActivityOnResume(activity);
+                            }
+                            if (activity instanceof android.app.NativeActivity) ((android.app.NativeActivity)activity).attachWindow(width, height);
+                        }
+
         }
         catch (Throwable cause)
         {

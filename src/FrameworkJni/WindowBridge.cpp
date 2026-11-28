@@ -2,7 +2,6 @@
 
 #include <cerrno>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>

@@ -1,17 +1,16 @@
 #include "FrameworkJni/SqliteBridge.hpp"
 
-#include <cstring>
 #include <sqlite3.h>
 #include <string>
 
 static sqlite3* DatabaseOf(jlong handle)
 {
-    return reinterpret_cast<sqlite3*>(static_cast<intptr_t>(handle));
+    return reinterpret_cast<sqlite3*>(handle);
 }
 
 static sqlite3_stmt* StatementOf(jlong handle)
 {
-    return reinterpret_cast<sqlite3_stmt*>(static_cast<intptr_t>(handle));
+    return reinterpret_cast<sqlite3_stmt*>(handle);
 }
 
 static std::string ReadString(JNIEnv* env, jstring value)
@@ -41,7 +40,7 @@ static jlong SqliteOpen(JNIEnv* env, jclass, jstring path, jboolean readOnly)
     sqlite3_busy_timeout(database, 5000);
     sqlite3_extended_result_codes(database, 1);
 
-    return static_cast<jlong>(reinterpret_cast<intptr_t>(database));
+    return reinterpret_cast<intptr_t>(database);
 }
 
 static void SqliteClose(JNIEnv*, jclass, jlong handle)
@@ -69,13 +68,12 @@ static jlong SqlitePrepare(JNIEnv* env, jclass, jlong handle, jstring sql)
     sqlite3_stmt* prepared = nullptr;
     if (sqlite3_prepare_v2(database, statement.c_str(), -1, &prepared, nullptr) != SQLITE_OK) return 0;
 
-    return static_cast<jlong>(reinterpret_cast<intptr_t>(prepared));
+    return reinterpret_cast<intptr_t>(prepared);
 }
 
 static void SqliteFinalize(JNIEnv*, jclass, jlong statement)
 {
-    sqlite3_stmt* prepared = StatementOf(statement);
-    if (prepared) sqlite3_finalize(prepared);
+    if (sqlite3_stmt* prepared = StatementOf(statement)) sqlite3_finalize(prepared);
 }
 
 static jint SqliteStep(JNIEnv*, jclass, jlong statement)
@@ -101,8 +99,7 @@ static void SqliteReset(JNIEnv*, jclass, jlong statement)
 
 static void SqliteBindNull(JNIEnv*, jclass, jlong statement, jint index)
 {
-    sqlite3_stmt* prepared = StatementOf(statement);
-    if (prepared) sqlite3_bind_null(prepared, index);
+    if (sqlite3_stmt* prepared = StatementOf(statement)) sqlite3_bind_null(prepared, index);
 }
 
 static void SqliteBindLong(JNIEnv*, jclass, jlong statement, jint index, jlong value)
@@ -113,8 +110,7 @@ static void SqliteBindLong(JNIEnv*, jclass, jlong statement, jint index, jlong v
 
 static void SqliteBindDouble(JNIEnv*, jclass, jlong statement, jint index, jdouble value)
 {
-    sqlite3_stmt* prepared = StatementOf(statement);
-    if (prepared) sqlite3_bind_double(prepared, index, value);
+    if (sqlite3_stmt* prepared = StatementOf(statement)) sqlite3_bind_double(prepared, index, value);
 }
 
 static void SqliteBindString(JNIEnv* env, jclass, jlong statement, jint index, jstring value)
@@ -200,7 +196,7 @@ static jbyteArray SqliteColumnBlob(JNIEnv* env, jclass, jlong statement, jint in
     jbyteArray copied = env->NewByteArray(length);
     if (!copied) return nullptr;
 
-    env->SetByteArrayRegion(copied, 0, length, reinterpret_cast<const jbyte*>(bytes));
+    env->SetByteArrayRegion(copied, 0, length, static_cast<const jbyte*>(bytes));
     return copied;
 }
 
@@ -264,11 +260,11 @@ static const JNINativeMethod SQLITE_METHODS[] = {
 };
 
 static const ArtRuntime::NativeMethodTable TABLES[] = {
-    {SqliteBridge::SQLITE_CLASS, SQLITE_METHODS, static_cast<int>(sizeof(SQLITE_METHODS) / sizeof(SQLITE_METHODS[0]))},
+    {SqliteBridge::SQLITE_CLASS, SQLITE_METHODS, static_cast<int>(std::size(SQLITE_METHODS))},
 };
 
 const ArtRuntime::NativeMethodTable* SqliteBridge::Tables(int& count)
 {
-    count = static_cast<int>(sizeof(TABLES) / sizeof(TABLES[0]));
+    count = static_cast<int>(std::size(TABLES));
     return TABLES;
 }

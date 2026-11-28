@@ -1,6 +1,5 @@
 #include "FrameworkJni/GraphicsBridge.hpp"
 
-#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -15,7 +14,7 @@ struct BitmapHandle
 
 BitmapHandle* FrameworkJniBitmapFrom(jlong handle)
 {
-    return reinterpret_cast<BitmapHandle*>(static_cast<intptr_t>(handle));
+    return reinterpret_cast<BitmapHandle*>(handle);
 }
 
 const Rasterizer::Surface* FrameworkJniBitmapSurface(BitmapHandle* bitmap)
@@ -268,6 +267,6 @@ static const JNINativeMethod BITMAP_METHODS[] = {
 
 const JNINativeMethod* FrameworkJniBitmapMethods(int& count)
 {
-    count = static_cast<int>(sizeof(BITMAP_METHODS) / sizeof(BITMAP_METHODS[0]));
+    count = static_cast<int>(std::size(BITMAP_METHODS));
     return BITMAP_METHODS;
 }

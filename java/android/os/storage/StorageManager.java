@@ -6,7 +6,8 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.ParcelFileDescriptor;
 import android.os.ProxyFileDescriptorCallback;
-
+import android.annotation.NonNull;
+import android.annotation.NonNull;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import android.text.TextUtils;
 
 public class StorageManager
 {
@@ -86,6 +88,28 @@ public class StorageManager
     public String getMountedObbPath(String rawPath)
     {
         return null;
+    }
+
+    public @NonNull String getVolumeState(String mountPoint) {
+            final StorageVolume vol = getStorageVolume(new File(mountPoint));
+            if (vol != null) {
+                return vol.getState();
+            } else {
+                return Environment.MEDIA_UNKNOWN;
+            }
+        }
+    public  String getBestVolumeDescription(VolumeInfo vol) {
+            return null;
+     }
+    @Deprecated
+    public @NonNull String[] getVolumePaths() {
+            StorageVolume[] volumes = getVolumeList();
+            int count = volumes.length;
+            String[] paths = new String[count];
+            for (int i = 0; i < count; i++) {
+                paths[i] = volumes[i].getPath();
+            }
+            return paths;
     }
 
     public android.app.PendingIntent getManageSpaceActivityIntent(String packageName, int requestCode)

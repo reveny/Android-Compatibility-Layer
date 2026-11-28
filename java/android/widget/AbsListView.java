@@ -87,7 +87,7 @@ public abstract class AbsListView extends AdapterView<ListAdapter>
     private boolean mDrawSelectorOnTop;
     private final Rect mSelectorRect = new Rect();
     private int mSelectorPosition = INVALID_POSITION;
-    private boolean mSelectedChildViewEnabled;
+    private boolean mIsChildViewEnabled;
 
     int mTouchMode = TOUCH_MODE_REST;
     private int mMotionPosition = INVALID_POSITION;
@@ -1395,12 +1395,12 @@ public abstract class AbsListView extends AdapterView<ListAdapter>
 
     public boolean isSelectedChildViewEnabled()
     {
-        return mSelectedChildViewEnabled;
+        return mIsChildViewEnabled;
     }
 
     public void setSelectedChildViewEnabled(boolean selectedChildViewEnabled)
     {
-        mSelectedChildViewEnabled = selectedChildViewEnabled;
+        mIsChildViewEnabled = selectedChildViewEnabled;
     }
 
     @Override

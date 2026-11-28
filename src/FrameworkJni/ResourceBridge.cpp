@@ -23,21 +23,21 @@ static AndroidfwApk* ApkFrom(jlong handle)
 
 static AndroidfwTheme* ThemeFrom(jlong handle)
 {
-    std::lock_guard<std::mutex> held(gHandleLock);
-    if (handle == 0 || gLiveThemes.find(handle) == gLiveThemes.end()) return nullptr;
+    std::lock_guard held(gHandleLock);
+    if (handle == 0 || !gLiveThemes.contains(handle)) return nullptr;
     return reinterpret_cast<AndroidfwTheme*>(handle);
 }
 
 static AndroidfwXml* XmlFrom(jlong handle)
 {
-    std::lock_guard<std::mutex> held(gHandleLock);
-    if (handle == 0 || gLiveXml.find(handle) == gLiveXml.end()) return nullptr;
+    std::lock_guard held(gHandleLock);
+    if (handle == 0 || !gLiveXml.contains(handle)) return nullptr;
     return reinterpret_cast<AndroidfwXml*>(handle);
 }
 
 static void RegisterHandle(std::set<jlong>& registry, jlong handle)
 {
-    std::lock_guard<std::mutex> held(gHandleLock);
+    std::lock_guard held(gHandleLock);
     registry.insert(handle);
 }
 
@@ -300,7 +300,7 @@ static jlong AssetsOpen(JNIEnv* env, jclass, jlong handle, jstring path)
         return 0;
     }
 
-    jlong assetHandle = reinterpret_cast<jlong>(asset);
+    auto assetHandle = reinterpret_cast<jlong>(asset);
     RegisterHandle(gLiveAssets, assetHandle);
     return assetHandle;
 }
@@ -327,14 +327,14 @@ static jlong AssetsOpenNonAsset(JNIEnv* env, jclass, jlong handle, jstring path)
 
 static Apk::Asset* AssetFrom(jlong handle)
 {
-    std::lock_guard<std::mutex> held(gHandleLock);
-    if (handle == 0 || gLiveAssets.find(handle) == gLiveAssets.end()) return nullptr;
+    std::lock_guard held(gHandleLock);
+    if (handle == 0 || !gLiveAssets.contains(handle)) return nullptr;
     return reinterpret_cast<Apk::Asset*>(handle);
 }
 
 static Apk::Asset* ClaimAsset(jlong handle)
 {
-    std::lock_guard<std::mutex> held(gHandleLock);
+    std::lock_guard held(gHandleLock);
     if (handle == 0 || gLiveAssets.erase(handle) == 0) return nullptr;
     return reinterpret_cast<Apk::Asset*>(handle);
 }
@@ -419,7 +419,7 @@ static jboolean DescriptorClose(JNIEnv* env, jclass, jobject descriptor, jint fi
     if (fileDescriptor < 0) return JNI_FALSE;
 
     {
-        std::lock_guard<std::mutex> held(gHandleLock);
+        std::lock_guard held(gHandleLock);
         if (gLiveDescriptors.erase(fileDescriptor) == 0)
         {
             fprintf(stderr, "[resources] refusing to close descriptor %d, which this runtime did not open\n", fileDescriptor);
@@ -435,14 +435,13 @@ static void DescriptorInvalidate(JNIEnv* env, jclass, jobject descriptor)
     if (descriptor)
     {
         jclass descriptorClass = env->GetObjectClass(descriptor);
-        jmethodID getInt = descriptorClass ? env->GetMethodID(descriptorClass, "getInt$", "()I") : nullptr;
 
-        if (getInt)
+        if (jmethodID getInt = descriptorClass ? env->GetMethodID(descriptorClass, "getInt$", "()I") : nullptr)
         {
             jint detached = env->CallIntMethod(descriptor, getInt);
             if (detached >= 0)
             {
-                std::lock_guard<std::mutex> held(gHandleLock);
+                std::lock_guard held(gHandleLock);
                 gLiveDescriptors.erase(detached);
             }
         }
@@ -458,7 +457,7 @@ static void DescriptorInvalidate(JNIEnv* env, jclass, jobject descriptor)
 static jlong AssetsLength(JNIEnv*, jclass, jlong assetHandle)
 {
     Apk::Asset* asset = AssetFrom(assetHandle);
-    return asset ? static_cast<jlong>(asset->length) : -1;
+    return asset ? asset->length : -1;
 }
 
 static jint AssetsRead(JNIEnv* env, jclass, jlong assetHandle, jbyteArray buffer, jint offset, jint count)
@@ -568,7 +567,7 @@ static void ResourcesSetTo(JNIEnv*, jclass, jlong targetHandle, jlong sourceHand
     bool copied = AndroidfwThemeSetTo(target, source);
     if (FrameworkJni::IsTracing("styled"))
     {
-        fprintf(stderr, "[styled] setTo target=%p source=%p copied=%d\n", (void*)target, (void*)source, copied ? 1 : 0);
+        fprintf(stderr, "[styled] setTo target=%p source=%p copied=%d\n", static_cast<void *>(target), static_cast<void *>(source), copied ? 1 : 0);
         fflush(stderr);
     }
 }
@@ -700,7 +699,7 @@ static jintArray XmlAttributeValue(JNIEnv* env, jclass, jlong handle, jint index
     jintArray array = env->NewIntArray(2);
     if (!array) return nullptr;
 
-    jint values[2] = {static_cast<jint>(type), static_cast<jint>(data)};
+    jint values[2] = {type, static_cast<jint>(data)};
     env->SetIntArrayRegion(array, 0, 2, values);
     return array;
 }
@@ -780,13 +779,13 @@ static const JNINativeMethod DESCRIPTOR_METHODS[] = {
 };
 
 static const ArtRuntime::NativeMethodTable TABLES[] = {
-    {ResourceBridge::RESOURCES_CLASS, RESOURCE_METHODS, static_cast<int>(sizeof(RESOURCE_METHODS) / sizeof(RESOURCE_METHODS[0]))},
-    {ResourceBridge::XML_PARSER_CLASS, XML_METHODS, static_cast<int>(sizeof(XML_METHODS) / sizeof(XML_METHODS[0]))},
-    {ResourceBridge::DESCRIPTOR_CLASS, DESCRIPTOR_METHODS, static_cast<int>(sizeof(DESCRIPTOR_METHODS) / sizeof(DESCRIPTOR_METHODS[0]))},
+    {ResourceBridge::RESOURCES_CLASS, RESOURCE_METHODS, static_cast<int>(std::size(RESOURCE_METHODS))},
+    {ResourceBridge::XML_PARSER_CLASS, XML_METHODS, static_cast<int>(std::size(XML_METHODS))},
+    {ResourceBridge::DESCRIPTOR_CLASS, DESCRIPTOR_METHODS, static_cast<int>(std::size(DESCRIPTOR_METHODS))},
 };
 
 const ArtRuntime::NativeMethodTable* ResourceBridge::Tables(int& count)
 {
-    count = static_cast<int>(sizeof(TABLES) / sizeof(TABLES[0]));
+    count = static_cast<int>(std::size(TABLES));
     return TABLES;
 }

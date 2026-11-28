@@ -13,7 +13,6 @@ public final class Settings
     public static final String ACTION_SETTINGS = "android.settings.SETTINGS";
     public static final String ACTION_APPLICATION_DETAILS_SETTINGS = "android.settings.APPLICATION_DETAILS_SETTINGS";
     public static final String ACTION_MANAGE_OVERLAY_PERMISSION = "android.settings.action.MANAGE_OVERLAY_PERMISSION";
-
     private Settings()
     {
     }
@@ -403,6 +402,7 @@ public final class Settings
         public static final String ADB_ENABLED = "adb_enabled";
         public static final String AUTO_TIME = "auto_time";
         public static final String DEVICE_NAME = "device_name";
+        public static final String BOOT_COUNT = "boot_count";
 
         private static final Table TABLE = new Table("global");
 
@@ -417,6 +417,7 @@ public final class Settings
             TABLE.seed(DEVELOPMENT_SETTINGS_ENABLED, "0");
             TABLE.seed(ADB_ENABLED, "0");
             TABLE.seed(AUTO_TIME, "1");
+            TABLE.seed(BOOT_COUNT, "1");
         }
 
         private Global()

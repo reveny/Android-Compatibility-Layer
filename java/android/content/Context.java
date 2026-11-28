@@ -183,7 +183,9 @@ public abstract class Context
         SERVICE_NAMES_BY_CLASS.put("android.os.PowerWhitelistManager", POWER_WHITELIST_MANAGER);
         SERVICE_NAMES_BY_CLASS.put("android.os.PowerExemptionManager", POWER_EXEMPTION_SERVICE);
     }
-
+    public int getThemeResId() {
+        return 0;
+    }
     public abstract Resources.Theme getTheme();
 
     public abstract void setTheme(int resourceId);
@@ -406,7 +408,7 @@ public abstract class Context
     public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter, String broadcastPermission,
                                    android.os.Handler scheduler)
     {
-        return registerReceiver(receiver, filter);
+        return runtime.Broadcasts.register(this, receiver, filter);
     }
 
     public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter, String broadcastPermission,

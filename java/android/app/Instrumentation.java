@@ -44,9 +44,12 @@ public class Instrumentation
 
     public void callActivityOnStart(Activity activity)
     {
+
         activity.onStart();
         activity.mStarted = true;
-        activity.dispatchLifecycleStarted();
+        if (!activity.isDestroyed()) {
+                activity.dispatchLifecycleStarted();
+        }
         ActivityThread.currentActivityThread().activityStateChanged(activity, true, false);
     }
 

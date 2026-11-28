@@ -1,7 +1,6 @@
 #include "AudioDevice/AudioDevice.hpp"
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 
 #if RUNTIME_HAVE_AUDIO
@@ -161,7 +160,7 @@ static void OnStreamProcess(void* userData)
     pw_stream_queue_buffer(stream->stream, held);
 }
 
-static const pw_stream_events STREAM_EVENTS = {
+static constexpr pw_stream_events STREAM_EVENTS = {
     PW_VERSION_STREAM_EVENTS, nullptr, &OnStreamStateChanged, nullptr, nullptr, nullptr,     nullptr,
     nullptr,                  &OnStreamProcess, nullptr,      nullptr, nullptr,
 };

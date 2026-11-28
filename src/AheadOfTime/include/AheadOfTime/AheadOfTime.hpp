@@ -4,7 +4,6 @@
 #include <string>
 
 #include "GuestRuntime/GuestRuntime.hpp"
-#include "GuestState/GuestState.hpp"
 
 namespace AheadOfTime
 {
