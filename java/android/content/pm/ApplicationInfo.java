@@ -192,6 +192,7 @@ public class ApplicationInfo extends PackageItemInfo implements Parcelable
     }
     public boolean isSystemApp(){
     return false;}
+    public static final int PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE = 1 << 29;
     @Override
     public CharSequence loadLabel(PackageManager packageManager)
     {
