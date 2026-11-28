@@ -62,6 +62,9 @@ public class Build
         public static final String BASE_OS = "";
         public static final String SDK = String.valueOf(runtime.PlatformConfig.SDK_INT);
         public static final int SDK_INT_FULL = runtime.PlatformConfig.SDK_INT * 100000;
+        private static final String[] ALL_CODENAMES = new String[] { "REL" };
+        public static final String[] ACTIVE_CODENAMES = "REL".equals(ALL_CODENAMES[0])
+                        ? new String[0] : ALL_CODENAMES;
     }
 
     public static class Partition
