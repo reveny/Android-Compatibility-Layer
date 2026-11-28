@@ -2333,15 +2333,14 @@ public class PackageParser {
         pkg.usesStaticLibraries = ArrayUtils.add(pkg.usesStaticLibraries, lname);
         pkg.usesStaticLibrariesVersions = ArrayUtils.appendLong(
                 pkg.usesStaticLibrariesVersions, version, true);
-        pkg.usesStaticLibrariesCertDigests = ArrayUtils.appendElement(String[].class,
-                pkg.usesStaticLibrariesCertDigests, certSha256Digests, true);
+
 
         return true;
     }
 
     private String[] parseAdditionalCertificates(Resources resources, XmlResourceParser parser,
             String[] outError) throws XmlPullParserException, IOException {
-        String[] certSha256Digests = EmptyArray.STRING;
+        String[] certSha256Digests = new String[0];
 
         int outerDepth = parser.getDepth();
         int type;
@@ -2776,7 +2775,7 @@ public class PackageParser {
                 com.android.internal.R.styleable.AndroidManifestPermission_permissionFlags, 0);
 
         // For now only platform runtime permissions can be restricted
-        if (!perm.info.isRuntime() || !"android".equals(perm.info.packageName)) {
+        if (!false || !"android".equals(perm.info.packageName)) {
             perm.info.flags &= ~PermissionInfo.FLAG_HARD_RESTRICTED;
             perm.info.flags &= ~PermissionInfo.FLAG_SOFT_RESTRICTED;
         } else {

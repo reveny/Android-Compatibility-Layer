@@ -192,6 +192,9 @@ public class ApplicationInfo extends PackageItemInfo implements Parcelable
     }
     public boolean isSystemApp(){
     return false;}
+        public static final int PRIVATE_FLAG_USES_NON_SDK_API = 1 << 22;
+    public int fullBackupContent = 0;
+    public static final int PRIVATE_FLAG_HAS_FRAGILE_USER_DATA = 1 << 24;
     public static final int PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE = 1 << 29;
     @Override
     public CharSequence loadLabel(PackageManager packageManager)

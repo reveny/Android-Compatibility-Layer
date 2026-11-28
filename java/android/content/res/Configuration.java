@@ -12,7 +12,7 @@ public final class Configuration implements Parcelable, Comparable<Configuration
     public static final int ORIENTATION_PORTRAIT = 1;
     public static final int ORIENTATION_LANDSCAPE = 2;
     public static final int ORIENTATION_SQUARE = 3;
-
+        public static final int NATIVE_CONFIG_VERSION = 0x0400;
     public static final int SCREENLAYOUT_SIZE_MASK = 0x0f;
     public static final int SCREENLAYOUT_SIZE_UNDEFINED = 0x00;
     public static final int SCREENLAYOUT_SIZE_SMALL = 0x01;
