@@ -983,6 +983,9 @@ public class Activity extends ContextThemeWrapper implements LayoutInflater.Fact
     {
         return mTitle;
     }
+    public void setTitle(int titleId) {
+        setTitle(getText(titleId));
+    }
 
     public void setTitle(CharSequence title)
     {
