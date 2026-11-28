@@ -1,7 +1,6 @@
 #include "CodeMap/CodeMap.hpp"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 
 static bool ReadGuest(const GuestState::MemoryAccessor& memory, uint64_t address, void* destination, uint64_t length)
@@ -44,7 +43,7 @@ CodeMap::Result CodeMap::ExecutableRange(const ElfLoader::Library& library, Gues
         if (!segment.executable) continue;
         if (segment.length == 0) continue;
 
-        uint64_t segmentStart = (uint64_t)segment.guestAddress;
+        auto segmentStart = static_cast<uint64_t>(segment.guestAddress);
         uint64_t segmentEnd = segmentStart + segment.length;
 
         if (!found || segmentStart < lowest) lowest = segmentStart;
@@ -64,7 +63,7 @@ CodeMap::Result CodeMap::ExecutableRange(const ElfLoader::Library& library, Gues
 void CodeMap::AddEntryPoint(GuestState::GuestAddress address, GuestState::GuestAddress executableStart,
                             GuestState::GuestAddress executableEnd, std::vector<FunctionRange>& functions)
 {
-    uint64_t raw = (uint64_t)address;
+    auto raw = (uint64_t)address;
     if (raw < (uint64_t)executableStart || raw >= (uint64_t)executableEnd) return;
 
     FunctionRange range;
@@ -80,7 +79,7 @@ static CodeMap::Result CollectFromExceptionTable(const ElfLoader::Library& libra
 {
     if (library.ehFrameAddress == GuestState::GuestAddress{} || library.ehFrameLength < 12) return CodeMap::Result::Ok;
 
-    uint64_t base = (uint64_t)library.ehFrameAddress;
+    auto base = static_cast<uint64_t>(library.ehFrameAddress);
 
     uint8_t header[4] = {0, 0, 0, 0};
     if (!ReadGuest(memory, base, header, sizeof(header))) return CodeMap::Result::UnreadableExceptionTable;
@@ -101,7 +100,7 @@ static CodeMap::Result CollectFromExceptionTable(const ElfLoader::Library& libra
     cursor += countSize;
 
     if (count > CodeMap::MAX_FUNCTIONS) return CodeMap::Result::TooManyFunctions;
-    if (cursor + (uint64_t)count * 8 > base + library.ehFrameLength) return CodeMap::Result::UnreadableExceptionTable;
+    if (cursor + static_cast<uint64_t>(count) * 8 > base + library.ehFrameLength) return CodeMap::Result::UnreadableExceptionTable;
 
     for (uint32_t index = 0; index < count; ++index)
     {
@@ -148,8 +147,8 @@ CodeMap::Result CodeMap::Discover(const ElfLoader::Library& library, const Guest
     {
         if (!symbol.isDefined || !symbol.isFunction) continue;
 
-        uint64_t address = (uint64_t)symbol.guestAddress;
-        if (address < (uint64_t)executableStart || address >= (uint64_t)executableEnd)
+        auto address = static_cast<uint64_t>(symbol.guestAddress);
+        if (address < static_cast<uint64_t>(executableStart) || address >= (uint64_t)executableEnd)
         {
             statistics.discarded += 1;
             continue;
@@ -186,12 +185,12 @@ CodeMap::Result CodeMap::Discover(const ElfLoader::Library& library, const Guest
 
     if (functions.size() > MAX_FUNCTIONS) return Result::TooManyFunctions;
 
-    std::sort(functions.begin(), functions.end(),
-              [](const FunctionRange& left, const FunctionRange& right) { return left.startAddress < right.startAddress; });
+    std::ranges::sort(functions,
+                      [](const FunctionRange& left, const FunctionRange& right) { return left.startAddress < right.startAddress; });
 
-    functions.erase(std::unique(functions.begin(), functions.end(),
-                                [](const FunctionRange& left, const FunctionRange& right)
-                                { return left.startAddress == right.startAddress; }),
+    functions.erase(std::ranges::unique(functions,
+                                        [](const FunctionRange& left, const FunctionRange& right)
+                                        { return left.startAddress == right.startAddress; }).begin(),
                     functions.end());
 
     for (size_t index = 0; index + 1 < functions.size(); ++index) functions[index].endAddress = functions[index + 1].startAddress;

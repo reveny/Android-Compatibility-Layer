@@ -9,7 +9,7 @@
 #include "AbiBridge/AbiBridge.hpp"
 #include "ElfLoader/ElfLoader.hpp"
 
-static constexpr int CALLBACK_COUNT = (int)NativeActivity::Callback::Count;
+static constexpr int CALLBACK_COUNT = static_cast<int>(NativeActivity::Callback::Count);
 static constexpr int32_t GUEST_SDK_VERSION = RUNTIME_BUILD_SDK_VERSION;
 
 struct NativeActivityState

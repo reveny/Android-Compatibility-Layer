@@ -1,6 +1,5 @@
 #include "HostedWindow/HostedWindow.hpp"
 
-#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -116,7 +115,7 @@ static void HandleMessage(HostedWindow::Session& session, const ControlChannel::
     bool refused = false;
 
     {
-        std::lock_guard<std::mutex> guard(session.mutex);
+        std::lock_guard guard(session.mutex);
 
         switch (message.kind)
         {

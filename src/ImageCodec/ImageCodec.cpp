@@ -1,7 +1,6 @@
 #include "ImageCodec/ImageCodec.hpp"
 
 #include <csetjmp>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
