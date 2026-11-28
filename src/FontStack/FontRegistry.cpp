@@ -14,7 +14,7 @@ struct FamilyEntry
     FontRegistry::Substitution substitution;
 };
 
-static const char* ROBOTO = "Roboto-Regular.ttf";
+static const char* ROBOTO = "NotoSerifSC.ttf";
 static const char* DROID_SANS_MONO = "DroidSansMono.ttf";
 static const char* NOTO_SANS_SC = "NotoSerifSC.ttf";
 
@@ -40,13 +40,13 @@ static const FamilyEntry FAMILIES[] = {
     {"times", ROBOTO, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
     {"serif-monospace", DROID_SANS_MONO, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false,
      FontRegistry::Substitution::FamilySubstituted},
-   {"noto sans sc", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::Exact},
-   {"noto sans cjk sc", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::Exact},
-   {"pingfang sc", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
-   {"microsoft yahei", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
+   {"noto-sans-sc", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::Exact},
+   {"noto-sans-cjk-sc", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::Exact},
+   {"pingfang-sc", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
+   {"microsoft-yahei", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
    {"simhei", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
    {"simsun", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
-   {"heiti sc", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
+   {"heiti-sc", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
    {"思源黑体", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::Exact},
    {"微软雅黑", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
    {"苹方", NOTO_SANS_SC, FontStack::WEIGHT_NORMAL, FontRegistry::AXIS_WIDTH_NORMAL, false, FontRegistry::Substitution::FamilySubstituted},
@@ -65,7 +65,7 @@ static float ClampWeight(int weight)
 
 static bool SupportsVariations(const char* fileName)
 {
-    return strcmp(fileName, ROBOTO) == 0;
+    return strcmp(fileName, ROBOTO) == 0 || strcmp(fileName, NOTO_SANS_SC) == 0;
 }
 
 bool FontRegistry::Resolve(const char* familyName, int weight, bool italic, Selection& selection)
