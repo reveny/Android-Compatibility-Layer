@@ -117,6 +117,7 @@ public class Build
     public static class VERSION_CODES
     {
         public static final int LOLLIPOP = 21;
+        public static final int DONUT = 4;
         public static final int LOLLIPOP_MR1 = 22;
         public static final int M = 23;
         public static final int N = 24;
