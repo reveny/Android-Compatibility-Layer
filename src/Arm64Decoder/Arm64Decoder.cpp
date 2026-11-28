@@ -258,7 +258,7 @@ static Arm64Decoder::Result DecodeDataProcessingImmediate(Ir::Function& function
             EmitFlagsFrom(function, block, address, Ir::Opcode::ComputeNzcvLogical, result, zero, zero, type);
         }
 
-        EmitWriteGeneral(block, address, rd, result, type, opc == 3 ? false : true);
+        EmitWriteGeneral(block, address, rd, result, type, opc != 3);
         return Arm64Decoder::Result::Ok;
     }
 
@@ -790,7 +790,7 @@ static Arm64Decoder::Result DecodeDataProcessingRegister(Ir::Function& function,
         bool subtract = (encoding >> 30) & 1;
         bool immediateForm = (encoding >> 11) & 1;
         Ir::Condition condition = static_cast<Ir::Condition>((encoding >> 12) & 0xf);
-        uint64_t flags = (uint64_t)(encoding & 0xf) << 28;
+        uint64_t flags = static_cast<uint64_t>(encoding & 0xf) << 28;
 
         Ir::Value left = EmitReadGeneral(function, block, address, rn, type, false);
         Ir::Value right = immediateForm ? EmitConstant(function, block, address, (encoding >> 16) & 0x1f, type)
@@ -2711,9 +2711,8 @@ static Arm64Decoder::Result DecodeVectorDataProcessing(Ir::Function& function, I
     if ((encoding & 0xbf208c00u) == 0x0e000000u)
     {
         uint32_t length = (encoding >> 13) & 0x3;
-        bool extend = ((encoding >> 12) & 1) != 0;
 
-        if (extend) return Arm64Decoder::Result::Unimplemented;
+        if (((encoding >> 12) & 1) != 0) return Arm64Decoder::Result::Unimplemented;
 
         Ir::Value selectors = EmitReadVector(function, block, address, rm, vectorType);
         Ir::Value gathered;
@@ -4365,7 +4364,7 @@ Arm64Decoder::Result Arm64Decoder::DecodeBlock(Context& context, GuestState::Gue
             return Result::Ok;
         }
 
-        if (context.blockLeaders && context.blockLeaders->count(cursor) != 0)
+        if (context.blockLeaders && context.blockLeaders->contains(cursor))
         {
             block.successorFallthrough = static_cast<GuestState::GuestAddress>(cursor);
             return Result::Ok;
@@ -4447,8 +4446,8 @@ Arm64Decoder::Result Arm64Decoder::DecodeFunction(Context& context, GuestState::
         CollectSuccessors(block, entry, end, leaders, pending);
     }
 
-    std::vector<uint64_t> starts(leaders.begin(), leaders.end());
-    std::sort(starts.begin(), starts.end());
+    std::vector starts(leaders.begin(), leaders.end());
+    std::ranges::sort(starts);
 
     context.blockLeaders = &leaders;
 
