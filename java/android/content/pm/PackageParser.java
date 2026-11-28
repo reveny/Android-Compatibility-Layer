@@ -40,8 +40,9 @@ import static android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS;
 import static android.content.pm.PackageManager.MATCH_DISABLED_UNTIL_USED_COMPONENTS;
 import static android.os.Build.VERSION_CODES.O;
 
-import android.os.Trace.TRACE_TAG_PACKAGE_MANAGER;
+import static android.os.Trace.TRACE_TAG_PACKAGE_MANAGER;
 import android.annotation.IntDef;
+import com.android.internal.util.XmlUtils;
 import android.annotation.IntRange;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
@@ -704,127 +705,6 @@ public class PackageParser {
         }
     }
 
-    /**
-     * Parse only lightweight details about the package at the given location.
-     * Automatically detects if the package is a monolithic style (single APK
-     * file) or cluster style (directory of APKs).
-     * <p>
-     * This performs checking on cluster style packages, such as
-     * requiring identical package name and version codes, a single base APK,
-     * and unique split names.
-     *
-     * @see PackageParser#parsePackage(File, int)
-     */
-    @UnsupportedAppUsage
-    public static PackageLite parsePackageLite(File packageFile, int flags)
-            throws PackageParserException {
-        if (packageFile.isDirectory()) {
-            return parseClusterPackageLite(packageFile, flags);
-        } else {
-            return parseMonolithicPackageLite(packageFile, flags);
-        }
-    }
-
-    private static PackageLite parseMonolithicPackageLite(File packageFile, int flags)
-            throws PackageParserException {
-        Trace.traceBegin(TRACE_TAG_PACKAGE_MANAGER, "parseApkLite");
-        final ApkLite baseApk = parseApkLite(packageFile, flags);
-        final String packagePath = packageFile.getAbsolutePath();
-        Trace.traceEnd(TRACE_TAG_PACKAGE_MANAGER);
-        return new PackageLite(packagePath, baseApk.codePath, baseApk, null, null, null, null, null,
-                null);
-    }
-
-    static PackageLite parseClusterPackageLite(File packageDir, int flags)
-            throws PackageParserException {
-        final File[] files = packageDir.listFiles();
-        if (ArrayUtils.isEmpty(files)) {
-            throw new PackageParserException(INSTALL_PARSE_FAILED_NOT_APK,
-                    "No packages found in split");
-        }
-        // Apk directory is directly nested under the current directory
-        if (files.length == 1 && files[0].isDirectory()) {
-            return parseClusterPackageLite(files[0], flags);
-        }
-
-        String packageName = null;
-        int versionCode = 0;
-
-        Trace.traceBegin(TRACE_TAG_PACKAGE_MANAGER, "parseApkLite");
-        final ArrayMap<String, ApkLite> apks = new ArrayMap<>();
-        for (File file : files) {
-            if (isApkFile(file)) {
-                final ApkLite lite = parseApkLite(file, flags);
-
-                // Assert that all package names and version codes are
-                // consistent with the first one we encounter.
-                if (packageName == null) {
-                    packageName = lite.packageName;
-                    versionCode = lite.versionCode;
-                } else {
-                    if (!packageName.equals(lite.packageName)) {
-                        throw new PackageParserException(INSTALL_PARSE_FAILED_BAD_MANIFEST,
-                                "Inconsistent package " + lite.packageName + " in " + file
-                                + "; expected " + packageName);
-                    }
-                    if (versionCode != lite.versionCode) {
-                        throw new PackageParserException(INSTALL_PARSE_FAILED_BAD_MANIFEST,
-                                "Inconsistent version " + lite.versionCode + " in " + file
-                                + "; expected " + versionCode);
-                    }
-                }
-
-                // Assert that each split is defined only once
-                if (apks.put(lite.splitName, lite) != null) {
-                    throw new PackageParserException(INSTALL_PARSE_FAILED_BAD_MANIFEST,
-                            "Split name " + lite.splitName
-                            + " defined more than once; most recent was " + file);
-                }
-            }
-        }
-        Trace.traceEnd(TRACE_TAG_PACKAGE_MANAGER);
-
-        final ApkLite baseApk = apks.remove(null);
-        if (baseApk == null) {
-            throw new PackageParserException(INSTALL_PARSE_FAILED_BAD_MANIFEST,
-                    "Missing base APK in " + packageDir);
-        }
-
-        // Always apply deterministic ordering based on splitName
-        final int size = apks.size();
-
-        String[] splitNames = null;
-        boolean[] isFeatureSplits = null;
-        String[] usesSplitNames = null;
-        String[] configForSplits = null;
-        String[] splitCodePaths = null;
-        int[] splitRevisionCodes = null;
-        String[] splitClassLoaderNames = null;
-        if (size > 0) {
-            splitNames = new String[size];
-            isFeatureSplits = new boolean[size];
-            usesSplitNames = new String[size];
-            configForSplits = new String[size];
-            splitCodePaths = new String[size];
-            splitRevisionCodes = new int[size];
-
-            splitNames = apks.keySet().toArray(splitNames);
-            Arrays.sort(splitNames, sSplitNameComparator);
-
-            for (int i = 0; i < size; i++) {
-                final ApkLite apk = apks.get(splitNames[i]);
-                usesSplitNames[i] = apk.usesSplitName;
-                isFeatureSplits[i] = apk.isFeatureSplit;
-                configForSplits[i] = apk.configForSplit;
-                splitCodePaths[i] = apk.codePath;
-                splitRevisionCodes[i] = apk.revisionCode;
-            }
-        }
-
-        final String codePath = packageDir.getAbsolutePath();
-        return new PackageLite(codePath, baseApk.codePath, baseApk, splitNames, isFeatureSplits,
-                usesSplitNames, configForSplits, splitCodePaths, splitRevisionCodes);
-    }
 
     /**
      * Parse the package at the given location. Automatically detects if the
@@ -1008,44 +888,7 @@ public class PackageParser {
         }
     }
 
-    private void parseSplitApk(Package pkg, int splitIndex, AssetManager assets, int flags)
-            throws PackageParserException {
-        final String apkPath = pkg.splitCodePaths[splitIndex];
 
-        mParseError = PackageManager.INSTALL_SUCCEEDED;
-        mArchiveSourcePath = apkPath;
-
-        if (DEBUG_JAR) Slog.d(TAG, "Scanning split APK: " + apkPath);
-
-        final Resources res;
-        XmlResourceParser parser = null;
-        try {
-            // This must always succeed, as the path has been added to the AssetManager before.
-            final int cookie = assets.findCookieForPath(apkPath);
-            if (cookie == 0) {
-                throw new PackageParserException(INSTALL_PARSE_FAILED_BAD_MANIFEST,
-                        "Failed adding asset path: " + apkPath);
-            }
-
-            parser = assets.openXmlResourceParser(cookie, ANDROID_MANIFEST_FILENAME);
-            res = new Resources(assets, mMetrics, null);
-
-            final String[] outError = new String[1];
-            pkg = parseSplitApk(pkg, res, parser, flags, splitIndex, outError);
-            if (pkg == null) {
-                throw new PackageParserException(mParseError,
-                        apkPath + " (at " + parser.getPositionDescription() + "): " + outError[0]);
-            }
-
-        } catch (PackageParserException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new PackageParserException(INSTALL_PARSE_FAILED_UNEXPECTED_EXCEPTION,
-                    "Failed to read manifest from " + apkPath, e);
-        } finally {
-            IoUtils.closeQuietly(parser);
-        }
-    }
 
     /**
      * Parse the manifest of a <em>split APK</em>.
@@ -1054,68 +897,7 @@ public class PackageParser {
      * of doing, so many valid features of a base APK have been carefully
      * omitted here.
      */
-    private Package parseSplitApk(Package pkg, Resources res, XmlResourceParser parser, int flags,
-            int splitIndex, String[] outError) throws XmlPullParserException, IOException,
-            PackageParserException {
-        AttributeSet attrs = parser;
 
-        // We parsed manifest tag earlier; just skip past it
-        parsePackageSplitNames(parser, attrs);
-
-        mParseInstrumentationArgs = null;
-
-        int type;
-
-        boolean foundApp = false;
-
-        int outerDepth = parser.getDepth();
-        while ((type = parser.next()) != XmlPullParser.END_DOCUMENT
-                && (type != XmlPullParser.END_TAG || parser.getDepth() > outerDepth)) {
-            if (type == XmlPullParser.END_TAG || type == XmlPullParser.TEXT) {
-                continue;
-            }
-
-            String tagName = parser.getName();
-            if (tagName.equals(TAG_APPLICATION)) {
-                if (foundApp) {
-                    if (RIGID_PARSER) {
-                        outError[0] = "<manifest> has more than one <application>";
-                        mParseError = PackageManager.INSTALL_PARSE_FAILED_MANIFEST_MALFORMED;
-                        return null;
-                    } else {
-                        Slog.w(TAG, "<manifest> has more than one <application>");
-                        XmlUtils.skipCurrentTag(parser);
-                        continue;
-                    }
-                }
-
-                foundApp = true;
-                if (!parseSplitApplication(pkg, res, parser, flags, splitIndex, outError)) {
-                    return null;
-                }
-
-            } else if (RIGID_PARSER) {
-                outError[0] = "Bad element under <manifest>: "
-                    + parser.getName();
-                mParseError = PackageManager.INSTALL_PARSE_FAILED_MANIFEST_MALFORMED;
-                return null;
-
-            } else {
-                Slog.w(TAG, "Unknown element under <manifest>: " + parser.getName()
-                        + " at " + mArchiveSourcePath + " "
-                        + parser.getPositionDescription());
-                XmlUtils.skipCurrentTag(parser);
-                continue;
-            }
-        }
-
-        if (!foundApp) {
-            outError[0] = "<manifest> does not contain an <application>";
-            mParseError = PackageManager.INSTALL_PARSE_FAILED_MANIFEST_EMPTY;
-        }
-
-        return pkg;
-    }
 
     /** Parses the public keys from the set of signatures. */
     public static ArraySet<PublicKey> toSigningKeys(Signature[] signatures)
