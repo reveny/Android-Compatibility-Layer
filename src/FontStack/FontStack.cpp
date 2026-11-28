@@ -218,7 +218,7 @@ std::recursive_mutex& FontStack::Mutex()
 
 FontStack::Result FontStack::Initialize(const char* fontDirectory)
 {
-    std::lock_guard<std::recursive_mutex> guard(gMutex);
+    std::lock_guard guard(gMutex);
     if (gInitialized) return Result::AlreadyInitialized;
 
     const char* directory = fontDirectory;
@@ -238,7 +238,7 @@ FontStack::Result FontStack::Initialize(const char* fontDirectory)
 
 void FontStack::Shutdown()
 {
-    std::lock_guard<std::recursive_mutex> guard(gMutex);
+    std::lock_guard guard(gMutex);
     if (!gInitialized) return;
 
     ShapeCache::Clear();
@@ -262,13 +262,13 @@ void FontStack::Shutdown()
 
 bool FontStack::IsInitialized()
 {
-    std::lock_guard<std::recursive_mutex> guard(gMutex);
+    std::lock_guard guard(gMutex);
     return gInitialized;
 }
 
 FontStack::Result FontStack::ResolveFamily(const char* familyName, int weight, bool italic, uint32_t& font)
 {
-    std::lock_guard<std::recursive_mutex> guard(gMutex);
+    std::lock_guard guard(gMutex);
     if (!gInitialized) return Result::NotInitialized;
 
     FontRegistry::Selection selection;
@@ -295,7 +295,7 @@ FontStack::Result FontStack::ResolveFamily(const char* familyName, int weight, b
 
 FontStack::Result FontStack::LoadFontFromMemory(const uint8_t* fontBytes, size_t byteCount, int weight, bool italic, uint32_t& font)
 {
-    std::lock_guard<std::recursive_mutex> guard(gMutex);
+    std::lock_guard guard(gMutex);
     if (!gInitialized) return Result::NotInitialized;
     if (!fontBytes || byteCount == 0) return Result::InvalidArgument;
     if (byteCount > MAX_FONT_FILE_BYTES) return Result::FontFileTooLarge;
