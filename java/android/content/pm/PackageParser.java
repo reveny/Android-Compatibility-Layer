@@ -42,27 +42,18 @@ import static android.os.Build.VERSION_CODES.O;
 import static android.os.Trace.TRACE_TAG_PACKAGE_MANAGER;
 import static android.view.WindowManager.LayoutParams.ROTATION_ANIMATION_UNSPECIFIED;
 
-import static com.android.internal.pm.pkg.component.ParsedActivityUtils.RECREATE_ON_CONFIG_CHANGES_MASK;
 
 import android.annotation.IntDef;
 import android.annotation.IntRange;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.annotation.StringRes;
-import android.apex.ApexInfo;
-import android.app.ActivityTaskManager;
 import android.app.ActivityThread;
 import android.app.ResourcesManager;
 import android.compat.annotation.UnsupportedAppUsage;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.overlay.OverlayPaths;
-import android.content.pm.parsing.result.ParseResult;
-import android.content.pm.parsing.result.ParseTypeImpl;
-import android.content.pm.permission.SplitPermissionInfoParcelable;
-import android.content.pm.pkg.FrameworkPackageUserState;
-import android.content.res.ApkAssets;
 import android.content.res.AssetManager;
 import android.content.res.Configuration;
 import android.content.res.Resources;
@@ -104,9 +95,6 @@ import com.android.internal.os.ClassLoaderFactory;
 import com.android.internal.util.ArrayUtils;
 import com.android.internal.util.XmlUtils;
 
-import libcore.io.IoUtils;
-import libcore.util.EmptyArray;
-import libcore.util.HexEncoding;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -253,8 +241,6 @@ public class PackageParser {
 
     /** @hide */
     public static final String APK_FILE_EXTENSION = ".apk";
-    /** @hide */
-    public static final String APEX_FILE_EXTENSION = ".apex";
 
     /** @hide */
     public static class NewPermissionInfo {
@@ -687,226 +673,7 @@ public class PackageParser {
                 grantedPermissions, state, userId);
     }
 
-    /**
-     * PackageInfo generator specifically for apex files.
-     *
-     * @param pkg Package to generate info from. Should be derived from an apex.
-     * @param apexInfo Apex info relating to the package.
-     * @return PackageInfo
-     * @throws PackageParserException
-     */
-    public static PackageInfo generatePackageInfo(
-            PackageParser.Package pkg, ApexInfo apexInfo, int flags) {
-        return generatePackageInfo(pkg, apexInfo, EmptyArray.INT, flags, 0, 0,
-                Collections.emptySet(), FrameworkPackageUserState.DEFAULT, UserHandle.getCallingUserId());
-    }
 
-    private static PackageInfo generatePackageInfo(PackageParser.Package p, ApexInfo apexInfo,
-            int gids[], int flags, long firstInstallTime, long lastUpdateTime,
-            Set<String> grantedPermissions, FrameworkPackageUserState state, int userId) {
-        if (!checkUseInstalledOrHidden(flags, state, p.applicationInfo) || !p.isMatch(flags)) {
-            return null;
-        }
-
-        final ApplicationInfo applicationInfo;
-        if ((flags & (PackageManager.GET_ACTIVITIES | PackageManager.GET_RECEIVERS
-                | PackageManager.GET_SERVICES | PackageManager.GET_PROVIDERS)) != 0) {
-            applicationInfo = generateApplicationInfo(p, flags, state, userId);
-        } else {
-            applicationInfo = null;
-        }
-
-        PackageInfo pi = new PackageInfo();
-        pi.packageName = p.packageName;
-        pi.splitNames = p.splitNames;
-        pi.versionCode = p.mVersionCode;
-        pi.versionCodeMajor = p.mVersionCodeMajor;
-        pi.baseRevisionCode = p.baseRevisionCode;
-        pi.splitRevisionCodes = p.splitRevisionCodes;
-        pi.versionName = p.mVersionName;
-        pi.sharedUserId = p.mSharedUserId;
-        pi.sharedUserLabel = p.mSharedUserLabel;
-        pi.applicationInfo = generateApplicationInfo(p, flags, state, userId);
-        pi.installLocation = p.installLocation;
-        pi.isStub = p.isStub;
-        pi.coreApp = p.coreApp;
-        if ((pi.applicationInfo.flags&ApplicationInfo.FLAG_SYSTEM) != 0
-                || (pi.applicationInfo.flags&ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0) {
-            pi.requiredForAllUsers = p.mRequiredForAllUsers;
-        }
-        pi.restrictedAccountType = p.mRestrictedAccountType;
-        pi.requiredAccountType = p.mRequiredAccountType;
-        pi.overlayTarget = p.mOverlayTarget;
-        pi.targetOverlayableName = p.mOverlayTargetName;
-        pi.overlayCategory = p.mOverlayCategory;
-        pi.overlayPriority = p.mOverlayPriority;
-        pi.mOverlayIsStatic = p.mOverlayIsStatic;
-        pi.compileSdkVersion = p.mCompileSdkVersion;
-        pi.compileSdkVersionCodename = p.mCompileSdkVersionCodename;
-        pi.firstInstallTime = firstInstallTime;
-        pi.lastUpdateTime = lastUpdateTime;
-        if ((flags&PackageManager.GET_GIDS) != 0) {
-            pi.gids = gids;
-        }
-        if ((flags&PackageManager.GET_CONFIGURATIONS) != 0) {
-            int N = p.configPreferences != null ? p.configPreferences.size() : 0;
-            if (N > 0) {
-                pi.configPreferences = new ConfigurationInfo[N];
-                p.configPreferences.toArray(pi.configPreferences);
-            }
-            N = p.reqFeatures != null ? p.reqFeatures.size() : 0;
-            if (N > 0) {
-                pi.reqFeatures = new FeatureInfo[N];
-                p.reqFeatures.toArray(pi.reqFeatures);
-            }
-            N = p.featureGroups != null ? p.featureGroups.size() : 0;
-            if (N > 0) {
-                pi.featureGroups = new FeatureGroupInfo[N];
-                p.featureGroups.toArray(pi.featureGroups);
-            }
-        }
-        if ((flags & PackageManager.GET_ACTIVITIES) != 0) {
-            final int N = p.activities.size();
-            if (N > 0) {
-                int num = 0;
-                final ActivityInfo[] res = new ActivityInfo[N];
-                for (int i = 0; i < N; i++) {
-                    final Activity a = p.activities.get(i);
-                    if (isMatch(state, a.info, flags)) {
-                        if (PackageManager.APP_DETAILS_ACTIVITY_CLASS_NAME.equals(a.className)) {
-                            continue;
-                        }
-                        res[num++] = generateActivityInfo(a, flags, state, userId, applicationInfo);
-                    }
-                }
-                pi.activities = ArrayUtils.trimToSize(res, num);
-            }
-        }
-        if ((flags & PackageManager.GET_RECEIVERS) != 0) {
-            final int N = p.receivers.size();
-            if (N > 0) {
-                int num = 0;
-                final ActivityInfo[] res = new ActivityInfo[N];
-                for (int i = 0; i < N; i++) {
-                    final Activity a = p.receivers.get(i);
-                    if (isMatch(state, a.info, flags)) {
-                        res[num++] = generateActivityInfo(a, flags, state, userId, applicationInfo);
-                    }
-                }
-                pi.receivers = ArrayUtils.trimToSize(res, num);
-            }
-        }
-        if ((flags & PackageManager.GET_SERVICES) != 0) {
-            final int N = p.services.size();
-            if (N > 0) {
-                int num = 0;
-                final ServiceInfo[] res = new ServiceInfo[N];
-                for (int i = 0; i < N; i++) {
-                    final Service s = p.services.get(i);
-                    if (isMatch(state, s.info, flags)) {
-                        res[num++] = generateServiceInfo(s, flags, state, userId, applicationInfo);
-                    }
-                }
-                pi.services = ArrayUtils.trimToSize(res, num);
-            }
-        }
-        if ((flags & PackageManager.GET_PROVIDERS) != 0) {
-            final int N = p.providers.size();
-            if (N > 0) {
-                int num = 0;
-                final ProviderInfo[] res = new ProviderInfo[N];
-                for (int i = 0; i < N; i++) {
-                    final Provider pr = p.providers.get(i);
-                    if (isMatch(state, pr.info, flags)) {
-                        res[num++] = generateProviderInfo(pr, flags, state, userId,
-                                applicationInfo);
-                    }
-                }
-                pi.providers = ArrayUtils.trimToSize(res, num);
-            }
-        }
-        if ((flags&PackageManager.GET_INSTRUMENTATION) != 0) {
-            int N = p.instrumentation.size();
-            if (N > 0) {
-                pi.instrumentation = new InstrumentationInfo[N];
-                for (int i=0; i<N; i++) {
-                    pi.instrumentation[i] = generateInstrumentationInfo(
-                            p.instrumentation.get(i), flags);
-                }
-            }
-        }
-        if ((flags&PackageManager.GET_PERMISSIONS) != 0) {
-            int N = p.permissions.size();
-            if (N > 0) {
-                pi.permissions = new PermissionInfo[N];
-                for (int i=0; i<N; i++) {
-                    pi.permissions[i] = generatePermissionInfo(p.permissions.get(i), flags);
-                }
-            }
-            N = p.requestedPermissions.size();
-            if (N > 0) {
-                pi.requestedPermissions = new String[N];
-                pi.requestedPermissionsFlags = new int[N];
-                for (int i=0; i<N; i++) {
-                    final String perm = p.requestedPermissions.get(i);
-                    pi.requestedPermissions[i] = perm;
-                    // The notion of required permissions is deprecated but for compatibility.
-                    pi.requestedPermissionsFlags[i] |= PackageInfo.REQUESTED_PERMISSION_REQUIRED;
-                    if (grantedPermissions != null && grantedPermissions.contains(perm)) {
-                        pi.requestedPermissionsFlags[i] |= PackageInfo.REQUESTED_PERMISSION_GRANTED;
-                    }
-                }
-            }
-        }
-
-        if (apexInfo != null) {
-            File apexFile = new File(apexInfo.modulePath);
-
-            pi.applicationInfo.sourceDir = apexFile.getPath();
-            pi.applicationInfo.publicSourceDir = apexFile.getPath();
-            if (apexInfo.isFactory) {
-                pi.applicationInfo.flags |= ApplicationInfo.FLAG_SYSTEM;
-            } else {
-                pi.applicationInfo.flags &= ~ApplicationInfo.FLAG_SYSTEM;
-            }
-            if (apexInfo.isActive) {
-                pi.applicationInfo.flags |= ApplicationInfo.FLAG_INSTALLED;
-            } else {
-                pi.applicationInfo.flags &= ~ApplicationInfo.FLAG_INSTALLED;
-            }
-            pi.isApex = true;
-        }
-
-        // deprecated method of getting signing certificates
-        if ((flags & PackageManager.GET_SIGNATURES) != 0) {
-            if (p.mSigningDetails.hasPastSigningCertificates()) {
-                // Package has included signing certificate rotation information.  Return the oldest
-                // cert so that programmatic checks keep working even if unaware of key rotation.
-                pi.signatures = new Signature[1];
-                pi.signatures[0] = p.mSigningDetails.pastSigningCertificates[0];
-            } else if (p.mSigningDetails.hasSignatures()) {
-                // otherwise keep old behavior
-                int numberOfSigs = p.mSigningDetails.signatures.length;
-                pi.signatures = new Signature[numberOfSigs];
-                System.arraycopy(p.mSigningDetails.signatures, 0, pi.signatures, 0, numberOfSigs);
-            }
-        }
-
-        // replacement for GET_SIGNATURES
-        if ((flags & PackageManager.GET_SIGNING_CERTIFICATES) != 0) {
-            if (p.mSigningDetails != SigningDetails.UNKNOWN) {
-                // only return a valid SigningInfo if there is signing information to report
-                pi.signingInfo = new SigningInfo(
-                        new android.content.pm.SigningDetails(p.mSigningDetails.signatures,
-                                p.mSigningDetails.signatureSchemeVersion,
-                                p.mSigningDetails.publicKeys,
-                                p.mSigningDetails.pastSigningCertificates));
-            } else {
-                pi.signingInfo = null;
-            }
-        }
-        return pi;
-    }
 
     public static final int PARSE_MUST_BE_APK = 1 << 0;
     public static final int PARSE_IGNORE_PROCESSES = 1 << 1;
