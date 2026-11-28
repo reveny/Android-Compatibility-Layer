@@ -3,7 +3,6 @@
 #include "ApkSignature/ApkSignatureInternal.hpp"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <sys/mman.h>
