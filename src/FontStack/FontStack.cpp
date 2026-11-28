@@ -3,7 +3,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <string>
 #include <vector>
 
@@ -70,7 +69,7 @@ static float ClampTextSize(float textSize)
 
 static FT_Fixed ToFixed(float value)
 {
-    return static_cast<FT_Fixed>(std::lround(static_cast<double>(value) * 65536.0));
+    return std::lround(static_cast<double>(value) * 65536.0);
 }
 
 static FontStack::Result ApplyVariationAxes(FontEntry& entry)
@@ -179,7 +178,7 @@ static FontStack::Result PrepareFace(const StyleEntry& style, FontEntry*& entry)
     entry = FontFrom(style.font);
     if (!entry) return FontStack::Result::InvalidFont;
 
-    FT_F26Dot6 size = static_cast<FT_F26Dot6>(std::lround(static_cast<double>(style.textSize) * 64.0));
+    FT_F26Dot6 size = std::lround(static_cast<double>(style.textSize) * 64.0);
     if (FT_Set_Char_Size(entry->face, 0, size, 72, 72) != 0) return FontStack::Result::RasterizationFailed;
 
     hb_ft_font_changed(entry->shaper);
@@ -663,7 +662,7 @@ static RunEntry* RunFrom(uint64_t run)
 
 FontStack::Result FontStack::RunAdvance(uint64_t run, float& advance)
 {
-    std::lock_guard<std::recursive_mutex> guard(gMutex);
+    std::lock_guard guard(gMutex);
     RunEntry* entry = RunFrom(run);
     if (!entry) return Result::InvalidRun;
 
@@ -673,7 +672,7 @@ FontStack::Result FontStack::RunAdvance(uint64_t run, float& advance)
 
 FontStack::Result FontStack::RunGlyphCount(uint64_t run, int32_t& count)
 {
-    std::lock_guard<std::recursive_mutex> guard(gMutex);
+    std::lock_guard guard(gMutex);
     RunEntry* entry = RunFrom(run);
     if (!entry) return Result::InvalidRun;
 
