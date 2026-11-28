@@ -44,6 +44,7 @@ public final class Parcel
     private static final int EX_SECURITY = -1;
     private static final int EX_BAD_PARCELABLE = -2;
     private static final int EX_ILLEGAL_ARGUMENT = -3;
+    private static final int SIZE_COMPLEX_TYPE = 1;
     private static final int EX_NULL_POINTER = -4;
     private static final int EX_ILLEGAL_STATE = -5;
     private static final int EX_NETWORK_MAIN_THREAD = -6;
@@ -369,7 +370,44 @@ public final class Parcel
         mPosition += bytes;
         return new String(characters);
     }
+    public final void writeString8Array(@Nullable String[] val) {
+            if (val != null) {
+                int N = val.length;
+                writeInt(N);
+                for (int i=0; i<N; i++) {
+                    writeString8(val[i]);
+                }
+            } else {
+                writeInt(-1);
+            }
+        }
 
+        /** @hide */
+        @Nullable
+        public final String[] createString8Array() {
+            int N = readInt();
+            if (N >= 0) {
+                String[] val = new String[N];
+                for (int i=0; i<N; i++) {
+                    val[i] = readString8();
+                }
+                return val;
+            } else {
+                return null;
+            }
+        }
+
+        /** @hide */
+        public final void readString8Array(@NonNull String[] val) {
+            int N = readInt();
+            if (N == val.length) {
+                for (int i=0; i<N; i++) {
+                    val[i] = readString8();
+                }
+            } else {
+                throw new RuntimeException("bad array lengths");
+            }
+        }
     public String readString8()
         {
             int start = mPosition;

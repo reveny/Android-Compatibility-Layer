@@ -51,6 +51,7 @@ public class ActivityInfo extends ComponentInfo implements Parcelable
     public static final int DOCUMENT_LAUNCH_NEVER = 3;
 
     public static final int FLAG_MULTIPROCESS = 0x0001;
+    public static final int FLAG_SUPPORTS_PICTURE_IN_PICTURE = 0x400000;
     public static final int FLAG_FINISH_ON_TASK_LAUNCH = 0x0002;
     public static final int FLAG_CLEAR_TASK_ON_LAUNCH = 0x0004;
     public static final int FLAG_ALWAYS_RETAIN_TASK_STATE = 0x0008;
@@ -78,7 +79,14 @@ public class ActivityInfo extends ComponentInfo implements Parcelable
     public static final int PERSIST_ROOT_ONLY = 0;
     public static final int PERSIST_NEVER = 1;
     public static final int PERSIST_ACROSS_REBOOTS = 2;
-
+    public static final int RESIZE_MODE_RESIZEABLE_AND_PIPABLE_DEPRECATED = 3;
+    public static final int RESIZE_MODE_FORCE_RESIZEABLE = 4;
+    public static final int RESIZE_MODE_FORCE_RESIZABLE_LANDSCAPE_ONLY = 5;
+    public static final int RESIZE_MODE_FORCE_RESIZABLE_PORTRAIT_ONLY = 6;
+    public static final int RESIZE_MODE_FORCE_RESIZABLE_PRESERVE_ORIENTATION = 7;
+    public static final int RESIZE_MODE_RESIZEABLE = 2;
+    public static final int RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION = 1;
+    public static final int RESIZE_MODE_UNRESIZEABLE = 0;
     public static final int UIOPTION_SPLIT_ACTION_BAR_WHEN_NARROW = 1;
 
     public static final Parcelable.Creator<ActivityInfo> CREATOR = new Parcelable.Creator<ActivityInfo>()

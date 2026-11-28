@@ -5,6 +5,10 @@ import android.os.Parcelable;
 
 public class ApplicationInfo extends PackageItemInfo implements Parcelable
 {
+    public static final int PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE = 1 << 10;
+    public static final int PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION =
+                1 << 12;
+    public static final int PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_UNRESIZEABLE = 1 << 11;
     public static final int FLAG_SYSTEM = 1 << 0;
     public static final int FLAG_DEBUGGABLE = 1 << 1;
     public static final int FLAG_HAS_CODE = 1 << 2;

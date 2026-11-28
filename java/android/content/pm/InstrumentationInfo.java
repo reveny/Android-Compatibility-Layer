@@ -216,7 +216,6 @@ public class InstrumentationInfo extends PackageItemInfo implements Parcelable {
         ai.splitNames = splitNames;
         ai.splitSourceDirs = splitSourceDirs;
         ai.splitPublicSourceDirs = splitPublicSourceDirs;
-        ai.splitDependencies = splitDependencies;
         ai.dataDir = dataDir;
         ai.deviceProtectedDataDir = deviceProtectedDataDir;
         ai.credentialProtectedDataDir = credentialProtectedDataDir;
