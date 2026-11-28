@@ -3291,7 +3291,7 @@ static Ir::ValueType VectorAccessType(uint32_t scale)
 
 static int64_t LiteralOffset(uint32_t encoding)
 {
-    int64_t immediate = (int64_t)((encoding >> 5) & 0x7ffff);
+    int64_t immediate = (encoding >> 5) & 0x7ffff;
     if (immediate & 0x40000) immediate -= 0x80000;
     return immediate * 4;
 }
